@@ -1,0 +1,13 @@
+.cache
+.vscode
+compile_commands.json
+.env
+.envrc
+.direnv
+AGENT.md
+CLAUDE.md
+GEMINI.md
+.DS_Store
+Icon?
+Thumbs.db
+ehthumbs.db

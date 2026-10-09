@@ -1,0 +1,99 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
+home_package="$repo/home"
+enable_remote_login=false
+
+usage() {
+  echo 'usage: ./bootstrap [--enable-remote-login]'
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --enable-remote-login) enable_remote_login=true ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "unknown option: $1" >&2; usage >&2; exit 2 ;;
+  esac
+  shift
+done
+
+platform=$(uname -s)
+if $enable_remote_login && [[ "$platform" != Darwin ]]; then
+  echo '--enable-remote-login is only supported on macOS' >&2
+  exit 2
+fi
+
+git -C "$repo" submodule update --init --recursive
+
+if [[ "$platform" == Darwin ]]; then
+  if ! command -v brew >/dev/null 2>&1; then
+    brew_shellenv=$(/opt/homebrew/bin/brew shellenv bash)
+    eval "$brew_shellenv"
+  fi
+  if $enable_remote_login; then
+    "$repo/macos/bootstrap" --enable-remote-login
+  else
+    "$repo/macos/bootstrap"
+  fi
+fi
+
+mkdir -p "$HOME/.dotfiles-backup"
+backup_root=$(mktemp -d "$HOME/.dotfiles-backup/$(date +%Y%m%d-%H%M%S).XXXXXX")
+backed_up=false
+
+backup_config() {
+  local destination="$HOME/$1"
+  local backup_destination="$backup_root/$1"
+  [[ -e "$destination" || -L "$destination" ]] || return 0
+
+  mkdir -p "$(dirname "$backup_destination")"
+  cp -RLp "$destination" "$backup_destination"
+  rm -rf -- "$destination"
+  printf 'backed up %s\n' "$destination"
+  backed_up=true
+}
+
+backup_config_roots() {
+  local package=$1
+  local source
+
+  [[ -d "$package/.config" ]] || return 0
+  while IFS= read -r -d '' source; do
+    backup_config ".config/${source##*/}"
+  done < <(find "$package/.config" -mindepth 1 -maxdepth 1 -print0)
+}
+
+backup_config_roots "$home_package"
+if [[ "$platform" == Darwin ]]; then
+  backup_config_roots "$repo/macos/home"
+  backup_config .zprofile
+fi
+
+for ssh_config in "$HOME/.ssh/config" "$HOME/.ssh/config.local"; do
+  if [[ -e "$ssh_config" || -L "$ssh_config" ]]; then
+    rm -f -- "$ssh_config.bak"
+    cp -RLp "$ssh_config" "$ssh_config.bak"
+    rm -f -- "$ssh_config"
+  fi
+done
+
+rm -f -- "$HOME/.local/bin/multiplexer"
+
+stow --restow --no-folding --dir "$repo" --target "$HOME" home
+if [[ "$platform" == Darwin ]]; then
+  stow --restow --no-folding --dir "$repo/macos" --target "$HOME" home
+fi
+
+fish -c 'fisher update'
+
+if $backed_up; then
+  echo "Configuration snapshots were copied to $backup_root"
+else
+  rmdir "$backup_root" 2>/dev/null || true
+fi
+
+echo 'Bootstrap completed successfully.'
+if [[ "$platform" == Darwin ]]; then
+  echo 'Run ./macos/test to validate the installation.'
+fi

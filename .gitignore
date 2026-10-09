@@ -1,0 +1,12 @@
+.verification/
+
+.DS_Store
+**/fish_variables
+home/.config/fish/fisher/
+**/generated_completions/
+**/.cache/
+**/*.sock
+**/*.log
+**/*.db
+**/*.db-shm
+**/*.db-wal

@@ -1,0 +1,53 @@
+tap "brewforge/chinese"
+tap "brewforge/extras"
+
+brew "fish"
+brew "fisher"
+brew "stow"
+brew "fnm"
+brew "direnv"
+brew "zoxide"
+brew "fzf"
+
+brew "gh"
+brew "git"
+brew "wget"
+brew "curl"
+brew "fd"
+brew "tree"
+brew "htop"
+brew "ripgrep"
+brew "bat"
+
+brew "tmux"
+
+brew "pixi"
+brew "treefmt"
+brew "llvm"
+brew "rust"
+brew "stylua"
+brew "lua-language-server"
+brew "codespell"
+brew "imagemagick"
+brew "rust-analyzer"
+brew "uv"
+
+brew "neovim", args: ["HEAD"]
+brew "tree-sitter-cli", args: ["HEAD"]
+
+brew "libomp"
+
+uv "cmakelang"
+uv "pyink"
+uv "jupytext"
+
+cask "font-monaspace"
+cask "visual-studio-code"
+cask "docker-desktop"
+cask "1password-cli"
+cask "1password"
+cask "wezterm@nightly"
+cask "raycast"
+cask "xquartz"
+cask "v2rayn"
+cask "codex"
