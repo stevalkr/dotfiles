@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -euo pipefail
+runtime_root="${XDG_DATA_HOME:-$HOME/.local/share}/nvim"
+real_nvim=/opt/homebrew/bin/nvim
+[[ -x "$real_nvim" ]] || { echo "nvim: missing executable: $real_nvim" >&2; exit 127; }
+export NVIM_PYTHON_PROVIDER="$runtime_root/python/bin/python"
+export NVIM_NODE_PROVIDER="$runtime_root/node/packages/node_modules/.bin/neovim-node-host"
+node_real=$("$runtime_root/node/bin/node" -p 'process.execPath')
+export PATH="$runtime_root/node/bin:$(dirname -- "$node_real"):$runtime_root/node/packages/node_modules/.bin${PATH:+:$PATH}"
+exec "$real_nvim" \
+    --cmd 'let g:python3_host_prog = $NVIM_PYTHON_PROVIDER | let g:node_host_prog = $NVIM_NODE_PROVIDER' \
+    "$@"

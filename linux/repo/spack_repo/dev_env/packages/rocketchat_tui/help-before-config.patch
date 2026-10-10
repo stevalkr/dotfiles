@@ -1,0 +1,28 @@
+--- a/main.go
++++ b/main.go
+@@ -56,12 +56,6 @@
+ // It defines all the flags and parse their values.
+ // Initial model state with all required methods is used to start the TUI..
+ func main() {
+-	err := initialiseEnvVariable()
+-	if err != nil {
+-		log.Println("Environment variable file not found", err)
+-		panic(err)
+-	}
+-
+ 	flag.BoolVar(&debug,
+ 		"debug",
+ 		false,
+@@ -79,6 +73,12 @@
+ 	)
+ 	flag.Parse()
+ 
++	err := initialiseEnvVariable()
++	if err != nil {
++		log.Println("Environment variable file not found", err)
++		panic(err)
++	}
++
+ 	model, logger := createModel()
+ 	if logger != nil {
+ 		defer logger.Close()

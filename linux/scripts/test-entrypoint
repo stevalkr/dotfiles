@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+set -euo pipefail
+prefix=${LINUX_TEST_PREFIX:-$HOME/opt/dev-env}
+if [[ ! -e "$prefix" ]]; then
+    /opt/dotfiles/linux/install "$prefix" /opt/packages
+else
+    [[ -f "$prefix/.dotfiles-linux-install" ]] || { echo 'Test prefix is not a managed installation.' >&2; exit 1; }
+    # Compare the desired concrete graph, without replacing an existing prefix.
+    metadata=$(mktemp -d)
+    trap 'rm -rf -- "$metadata"' EXIT
+    tar -I zstd -xf /opt/packages/metadata.tar.zst -C "$metadata" metadata/environment/spack.lock
+    cmp "$metadata/metadata/environment/spack.lock" "$prefix/environment/spack.lock" || {
+        echo 'Package selection changed; set LINUX_TEST_PREFIX to a new path.' >&2; exit 1;
+    }
+    rm -rf -- "$metadata"
+    trap - EXIT
+fi
+source "$prefix/activate.sh"
+/opt/dotfiles/bootstrap
+if (($#)); then exec "$@"; fi
+exec bash --rcfile /opt/dotfiles/linux/scripts/test-bashrc -i

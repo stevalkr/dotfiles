@@ -11,22 +11,18 @@ set -gx FZF_DEFAULT_OPTS \
     '--bind=alt-j:down' \
     '--bind=alt-k:up'
 
-fish_add_path --global --move "$HOME/.local/bin"
-
 if test (uname) = Darwin
     if not type -q brew
         set -l brew_shellenv (/opt/homebrew/bin/brew shellenv fish); or return
         eval $brew_shellenv
     end
 
-    set -l brew_prefix $HOMEBREW_PREFIX
-    if not set -q brew_prefix[1]
-        set brew_prefix (path dirname (path dirname (command -s brew)))
-    end
-    if set -q brew_prefix[1]; and test -d "$brew_prefix/opt/llvm/bin"
-        fish_add_path --global --move "$brew_prefix/opt/llvm/bin"
+    if test -d /opt/homebrew/opt/llvm/bin
+        fish_add_path --global --move /opt/homebrew/opt/llvm/bin
     end
 end
+
+fish_add_path --global --move "$HOME/.local/bin"
 
 if status is-interactive
     fish_vi_key_bindings

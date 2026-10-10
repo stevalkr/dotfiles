@@ -2,7 +2,6 @@ tap "brewforge/chinese"
 tap "brewforge/extras"
 
 brew "fish"
-brew "fisher"
 brew "stow"
 brew "fnm"
 brew "direnv"

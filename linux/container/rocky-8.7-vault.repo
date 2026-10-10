@@ -1,0 +1,13 @@
+[dev-env-baseos]
+name=Rocky Linux 8.7 - BaseOS (vault)
+baseurl=https://dl.rockylinux.org/vault/rocky/8.7/BaseOS/$basearch/os/
+enabled=1
+gpgcheck=1
+gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-rockyofficial
+
+[dev-env-appstream]
+name=Rocky Linux 8.7 - AppStream (vault)
+baseurl=https://dl.rockylinux.org/vault/rocky/8.7/AppStream/$basearch/os/
+enabled=1
+gpgcheck=1
+gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-rockyofficial

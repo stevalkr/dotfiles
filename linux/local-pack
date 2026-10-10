@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+set -euo pipefail
+linux_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
+case "${1:-}" in
+    -h|--help) echo 'Usage: ./linux/local-pack [prepared-home]'; exit 0 ;;
+esac
+(($# <= 1)) || { echo 'local-pack accepts one prepared home' >&2; exit 2; }
+prepared_home=${1:-$linux_root/out/test-home}
+mkdir -p "$linux_root/out/local"
+staging=$(mktemp -d "$linux_root/out/local/.pack.XXXXXXXX")
+trap 'rm -rf -- "$staging"' EXIT
+python3 "$linux_root/scripts/local-data.py" pack "$prepared_home" "$staging/local.tar"
+zstd -T0 -19 "$staging/local.tar" -o "$staging/linux-local.tar.zst"
+mv "$staging/linux-local.tar.zst" "$linux_root/out/local/linux-local.tar.zst"
+python3 - "$linux_root/out/local/linux-local.tar.zst" >"$staging/linux-local.tar.zst.sha256" <<'PY'
+import hashlib, pathlib, sys
+path = pathlib.Path(sys.argv[1])
+digest = hashlib.sha256()
+with path.open('rb') as stream:
+    for chunk in iter(lambda: stream.read(1024 * 1024), b''):
+        digest.update(chunk)
+print(digest.hexdigest() + '  ' + path.name)
+PY
+mv "$staging/linux-local.tar.zst.sha256" "$linux_root/out/local/"
+echo "Runtime archive: $linux_root/out/local/linux-local.tar.zst"

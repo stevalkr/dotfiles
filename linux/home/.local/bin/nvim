@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -euo pipefail
+root=${DEV_ENV_ROOT:?Source the installed Linux prefix activate.sh before using Neovim}
+real_nvim="$root/view/bin/nvim"
+[[ -x "$real_nvim" ]] || { echo "nvim: missing executable: $real_nvim" >&2; exit 127; }
+export NVIM_PYTHON_PROVIDER="$root/view/bin/python3"
+export NVIM_NODE_PROVIDER="$root/view/bin/neovim-node-host"
+export PATH="$root/view/bin${PATH:+:$PATH}"
+exec "$real_nvim" \
+    --cmd 'let g:python3_host_prog = $NVIM_PYTHON_PROVIDER | let g:node_host_prog = $NVIM_NODE_PROVIDER' \
+    "$@"

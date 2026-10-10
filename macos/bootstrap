@@ -18,7 +18,10 @@ while [[ $# -gt 0 ]]; do
   shift
 done
 
-brew_shellenv=$(brew shellenv bash)
+[[ "$(uname -s)" == Darwin && "$(uname -m)" == arm64 ]] || {
+  echo 'macOS provisioning requires Apple Silicon.' >&2; exit 2;
+}
+brew_shellenv=$(/opt/homebrew/bin/brew shellenv bash)
 eval "$brew_shellenv"
 brew bundle --file "$brewfile"
 

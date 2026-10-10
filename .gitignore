@@ -1,8 +1,8 @@
 .verification/
+linux/out/
 
 .DS_Store
 **/fish_variables
-home/.config/fish/fisher/
 **/generated_completions/
 **/.cache/
 **/*.sock

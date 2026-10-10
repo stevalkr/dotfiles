@@ -1,0 +1,61 @@
+ARG TEST_IMAGE_REF=rockylinux:8.7@sha256:68bef3459bbb8c33841575a7f71c4de94718b7bbd103fd0417a537395d40c592
+FROM ${TEST_IMAGE_REF}
+
+ARG TEST_UID=1000
+ARG TEST_GID=1000
+
+LABEL org.opencontainers.image.title="dev-env test environment"
+LABEL org.opencontainers.image.description="EL8 test runtime used to install the core bundle and prepare user-home parsers"
+
+COPY container/rocky-8.7-vault.repo /etc/yum.repos.d/dev-env-rocky-8.7.repo
+
+# The test container is connected and may build user-home Tree-sitter parsers.
+# EL8 GCC supplies Clang's startup/support files; the core bundle and offline
+# target still install no compiler support from this image.
+RUN sed -i 's/^enabled=1/enabled=0/' /etc/yum.repos.d/Rocky-*.repo \
+    && dnf -y install \
+        bash \
+        bzip2 \
+        ca-certificates \
+        curl \
+        file \
+        findutils \
+        gcc \
+        gcc-c++ \
+        git \
+        glibc-devel \
+        gnupg2 \
+        gzip \
+        python3 \
+        shadow-utils \
+        tar \
+        unzip \
+        util-linux \
+        which \
+        xz \
+        zstd \
+    && dnf clean all \
+    && rm -rf /var/cache/dnf \
+    && if ! getent group "$TEST_GID" >/dev/null; then \
+        groupadd --gid "$TEST_GID" tester; \
+    fi \
+    && useradd \
+        --uid "$TEST_UID" \
+        --gid "$TEST_GID" \
+        --create-home \
+        --shell /bin/bash \
+        tester \
+    && mkdir -p /opt/dev-env-input
+
+COPY scripts/test-entrypoint /usr/local/libexec/dev-env-test-entrypoint
+COPY scripts/test-bashrc /usr/local/libexec/dev-env-test-bashrc
+
+RUN chmod 0755 /usr/local/libexec/dev-env-test-entrypoint \
+    && chmod 0644 /usr/local/libexec/dev-env-test-bashrc
+
+USER tester
+ENV HOME=/home/tester \
+    PYTHONDONTWRITEBYTECODE=1
+WORKDIR /home/tester
+
+ENTRYPOINT ["/usr/local/libexec/dev-env-test-entrypoint"]

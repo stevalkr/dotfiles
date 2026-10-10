@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+set -euo pipefail
+source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/scripts/_common.sh"
+case "${1:-}" in
+    -h|--help)
+        echo 'Usage: ./linux/test [-- COMMAND ARG...]'
+        echo 'Connected EL8 preparation shell. Set LINUX_TEST_PREFIX for a fresh install at another path.'
+        exit 0 ;;
+esac
+[[ "${1:-}" != -- ]] || shift
+require_command docker
+prepare_output_tree
+prepare_proxy_environment
+prepare_docker_network
+dotfiles_root=$(cd "$project_root/.." && pwd -P)
+# Preparation receives the complete checkout; it does not fetch submodules.
+git -C "$dotfiles_root" submodule status --recursive | \
+    while IFS= read -r line; do
+        [[ "$line" != -* && "$line" != U* ]] || { echo 'Populate submodules on the host first.' >&2; exit 1; }
+    done
+test -f "$bundle_root/metadata.tar.zst" || { echo 'Run ./linux/build and ./linux/pack first.' >&2; exit 1; }
+mkdir -p "$work_root/test-home"
+# Give the preparation container a writable config lock without changing the
+# host checkout. Copy the updated lock back explicitly when preparing a snapshot.
+prepared_lock="$work_root/nvim-pack-lock.json"
+if [[ ! -f "$prepared_lock" ]]; then
+    cp "$dotfiles_root/home/.config/nvim/nvim-pack-lock.json" "$prepared_lock"
+fi
+test_image="dotfiles-linux-test:${SPACK_COMMIT:0:12}"
+docker build --platform "$BUILD_PLATFORM" \
+    "${docker_network_build_args[@]}" "${docker_proxy_build_args[@]}" \
+    --build-arg "TEST_IMAGE_REF=$BUILD_IMAGE@$BUILD_IMAGE_DIGEST" \
+    --build-arg "TEST_UID=$(id -u)" --build-arg "TEST_GID=$(id -g)" \
+    --file "$project_root/Containerfile.test" --tag "$test_image" "$project_root"
+tty_args=(--interactive)
+if [[ -t 0 && -t 1 ]]; then tty_args+=(--tty); fi
+docker run --rm --platform "$BUILD_PLATFORM" "${tty_args[@]}" \
+    "${docker_network_run_args[@]}" "${docker_proxy_run_args[@]}" \
+    --security-opt label=disable --security-opt seccomp=unconfined \
+    --volume "$dotfiles_root:/opt/dotfiles:ro" \
+    --volume "$prepared_lock:/opt/dotfiles/home/.config/nvim/nvim-pack-lock.json" \
+    --volume "$bundle_root:/opt/packages:ro" \
+    --volume "$work_root/test-home:/home/tester" \
+    --env "LINUX_TEST_PREFIX=${LINUX_TEST_PREFIX:-/home/tester/opt/dev-env}" \
+    --env DOTFILES_LINUX_CONTAINER=1 \
+    "$test_image" "$@"
