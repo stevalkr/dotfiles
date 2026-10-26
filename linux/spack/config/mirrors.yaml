@@ -1,0 +1,8 @@
+# Release mirror, pruned to the runtime closure after each build. It is also a
+# binary source, so a build after clearing out/cache reuses its packages.
+mirrors:
+  dev-env:
+    url: /opt/dev-env-dist/packages/mirror
+    binary: true
+    source: false
+    signed: false

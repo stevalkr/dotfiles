@@ -117,7 +117,7 @@ config.foreground_text_hsb = {
   brightness = 1.4,
 }
 
-config.default_cursor_style = 'SteadyBar'
+-- config.default_cursor_style = 'SteadyBar'
 
 config.hide_tab_bar_if_only_one_tab = true
 config.use_fancy_tab_bar = false

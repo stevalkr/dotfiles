@@ -1,3 +1,0 @@
-repos:
-  dev_env: /opt/dev-env/repo/spack_repo/dev_env
-  builtin: /opt/spack-packages/repos/spack_repo/builtin

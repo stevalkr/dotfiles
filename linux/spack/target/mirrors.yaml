@@ -1,0 +1,6 @@
+mirrors:
+  dev-env:
+    url: $spack/../../../mirror
+    binary: true
+    source: false
+    signed: false

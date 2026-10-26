@@ -1,28 +1,18 @@
-[include]
-	path = ~/.config/git/config.local
-
 [alias]
 	cm = commit
 	ll = logline
 	logline = log --graph --pretty=format:'%Cred%h%Creset -%C(yellow)%d%Creset %s %Cgreen(%cr) %C(bold blue)<%an>%Creset' --abbrev-commit
 	st = status
 
-[commit]
-	gpgSign = false
-
 [core]
 	editor = nvim
-
-[gpg]
-	format = ssh
 
 [init]
 	defaultBranch = main
 
-[tag]
-	gpgSign = false
-
 [user]
 	email = 65963536+stevalkr@users.noreply.github.com
 	name = Steve Walker
-	signingKey = ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIP+PplmTdhrADgBUxkqPNfYThsEI/5DC48BuCxwjsZw6
+
+[include]
+	path = ~/.config/git/config.local

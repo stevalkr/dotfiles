@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# shellcheck source=lib.sh
+source "$(dirname -- "${BASH_SOURCE[0]}")/lib.sh"
+
+case "${1:-}" in
+    -h|--help)
+        printf '%s\n' 'Usage: ./linux/compact [<id>]' \
+            'Rebuild out/dev-env with only one release (default: current) and reinstall it.'
+        exit 0 ;;
+esac
+(($# <= 1)) || die 'compact takes at most one release id'
+need python3 sha256sum
+dev_env_init
+
+if (($# == 1)); then
+    id=$1
+else
+    current=$(readlink -- "$dev_env_link" 2>/dev/null) || die "no current release at $dev_env_link"
+    [[ "${current%/*}" == "$dev_env/releases" ]] || die "$dev_env_link points outside $dev_env"
+    id=${current##*/}
+fi
+[[ "$id" =~ $id_re && -d "$dev_env/releases/$id" ]] || die "no such release: $id"
+
+# Store paths are absolute, so the release is rebuilt at the same path.
+old=$dev_env.old
+[[ ! -e "$old" ]] || die "$old exists from an earlier compact; inspect and remove it"
+mv -- "$dev_env" "$old"
+restore() {
+    printf 'compact: failed, restoring %s\n' "$dev_env" >&2
+    rm -rf -- "$dev_env"
+    mv -- "$old" "$dev_env"
+}
+trap restore EXIT
+
+dev_env_init
+state=$old/releases/$id/state.sha256
+mirror_state ingest "$state" "$old/mirror" "$dev_env/mirror"
+"$linux_root/scripts/release.sh" "$id" "$state" "$old/releases/$id"
+"$linux_root/install" "$id"
+
+trap - EXIT
+rm -rf -- "$old"
+printf 'compact: kept %s\n' "$id"

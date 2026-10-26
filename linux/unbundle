@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# shellcheck source=lib.sh
+source "$(dirname -- "${BASH_SOURCE[0]}")/lib.sh"
+
+case "${1:-}" in
+    -h|--help)
+        printf '%s\n' 'Usage: ./linux/unbundle <archive>' \
+            'Add the archive objects to the mirror and create releases/<id>.'
+        exit 0 ;;
+esac
+(($# == 1)) || die 'unbundle takes one archive'
+[[ -f "$1" ]] || die "no such archive: $1"
+archive=$(cd -- "$(dirname -- "$1")" && pwd -P)/$(basename -- "$1")
+need python3 zstd sha256sum tar
+dev_env_init
+
+# Members: id, state.sha256, optional base, objects/<state path>.
+tar -tf "$archive" | while IFS= read -r member; do
+    case "$member" in
+        id|base|state.sha256|objects|objects/|objects/*) ;;
+        *) die "unexpected archive member: $member" ;;
+    esac
+    case "/$member/" in
+        */../*|*/./*) die "unexpected archive member: $member" ;;
+    esac
+done
+read_member() {
+    tar -xOf "$archive" "$1"
+}
+id=$(read_member id)
+[[ "$id" =~ $id_re ]] || die "bad release id: $id"
+[[ ! -e "$dev_env/releases/$id" ]] || die "release exists: $id"
+base=
+if tar -tf "$archive" base >/dev/null 2>&1; then
+    base=$(read_member base)
+    [[ "$base" =~ $id_re ]] || die "bad base id: $base"
+    [[ -d "$dev_env/releases/$base" ]] || die "base release $base is missing; unbundle it or use a full bundle"
+fi
+
+work=$(mktemp -d "$dev_env/.incoming.XXXXXXXX")
+trap 'rm -rf -- "$work"' EXIT
+tar -xf "$archive" -C "$work" --no-same-owner
+mkdir -p "$work/objects"
+mirror_state check --mirror "$dev_env/mirror" ${base:+--base "$dev_env/releases/$base"} \
+    "$work/state.sha256" "$work/objects"
+mirror_state ingest "$work/state.sha256" "$work/objects/mirror" "$dev_env/mirror"
+"$linux_root/scripts/release.sh" "$id" "$work/state.sha256" "$work/objects" \
+    ${base:+"$dev_env/releases/$base"}
+printf 'unbundle: run ./linux/install %s\n' "$id"

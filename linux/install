@@ -1,338 +1,73 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# shellcheck source=lib.sh
+source "$(dirname -- "${BASH_SOURCE[0]}")/lib.sh"
 
-# shellcheck source=_common.sh
-source "$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/scripts/_common.sh"
+case "${1:-}" in
+    -h|--help)
+        printf '%s\n' 'Usage: ./linux/install [<id>]' \
+            'Install a release (default: newest) from the local mirror and make it current.'
+        exit 0 ;;
+esac
+(($# <= 1)) || die 'install takes at most one release id'
 
-usage() {
-    cat <<'EOF'
-Usage: ./linux/install <new-absolute-prefix> [package-input-directory]
+# Target checks ------------------------------------------------------------
+[[ "$(uname -s) $(uname -m)" == 'Linux x86_64' ]] || die 'Linux x86_64 is required'
+((EUID != 0)) || die 'refusing to run as root'
+read -r libc version <<<"$(getconf GNU_LIBC_VERSION)"
+[[ "$libc" == glibc ]] || die "glibc is required, found $libc"
+IFS=. read -r major minor _ <<<"$version"
+((major > 2 || (major == 2 && minor >= 28))) || die "glibc 2.28 or newer is required, found $version"
+need python3 zstd sha256sum tar find
+python3 -c 'import sys; sys.exit(sys.version_info < (3, 6))' || die 'Python 3.6 or newer is required'
+tar --version | grep -q 'GNU tar' || die 'GNU tar is required'
 
-Verify metadata.tar.zst and the persistent binary mirror, then install into a
-new prefix using only local binary caches. The default input is out/packages.
-Keep the transferred directory to reuse unchanged files for subsequent releases.
-EOF
-}
+dev_env_init
+# Relocation pads into the builder's 128-character store prefix.
+store=$dev_env/store
+((${#store} <= 128)) || die "store path is longer than 128 characters: $store"
 
-die() {
-    printf 'dev-env install: %s\n' "$1" >&2
-    exit 1
-}
+id=${1:-$(newest_release)}
+[[ -n "$id" ]] || die 'no releases; run ./linux/unbundle first'
+release=$dev_env/releases/$id
+[[ "$id" =~ $id_re && -d "$release" ]] || die "no such release: $id"
 
-require_target_command() {
-    command -v "$1" >/dev/null 2>&1 || \
-        die "required target command is missing: $1"
-}
+# Install ------------------------------------------------------------------
+(
+    use_release_spack "$release"
+    spack -e "$release" install --only-concrete --use-buildcache=only \
+        --no-check-signature --fail-fast --show-log-on-error
+    spack -e "$release" env view regenerate
+    spack -e "$release" find --explicit --no-groups --format '{name} {prefix}' >"$release/.roots"
+)
 
-verify_target() {
-    local kernel architecture libc_name libc_version libc_major libc_minor
-
-    kernel="$(uname -s)"
-    architecture="$(uname -m)"
-    [[ "$kernel" == Linux ]] || die "expected Linux, found $kernel"
-    [[ "$architecture" == x86_64 ]] || \
-        die "expected x86_64, found $architecture"
-    ((EUID != 0)) || die 'refusing to install as root'
-
-    read -r libc_name libc_version <<<"$(getconf GNU_LIBC_VERSION)"
-    [[ "$libc_name" == glibc && "$libc_version" =~ ^[0-9]+\.[0-9]+ ]] || \
-        die "could not identify glibc: $libc_name $libc_version"
-    libc_major=${libc_version%%.*}
-    libc_minor=${libc_version#*.}
-    libc_minor=${libc_minor%%[^0-9]*}
-    if ((libc_major < 2 || (libc_major == 2 && libc_minor < 28))); then
-        die "glibc 2.28 or newer is required; found $libc_version"
-    fi
-
-    printf 'Target compatibility: Linux %s, glibc %s, non-root uid %s\n' \
-        "$architecture" "$libc_version" "$EUID"
-}
-
-select_inputs() {
-    [[ -d "$package_input" ]] || die "package inputs are missing: $package_input"
-    package_input="$(cd -- "$package_input" && pwd -P)"
-    archive="$package_input/metadata.tar.zst"
-    [[ -f "$archive" && -f "$package_input/SHA256SUMS" ]] || die 'metadata or checksums are missing'
-    # Only the transferred metadata archive and mirror objects belong here.
-    python3 - "$package_input/SHA256SUMS" <<'PYTHON'
-import pathlib, re, sys
-lines = pathlib.Path(sys.argv[1]).read_text().splitlines()
-if not lines:
-    raise SystemExit('empty checksum manifest')
-seen = set()
-for line in lines:
-    match = re.fullmatch(r'[0-9a-f]{64}  (.+)', line)
-    if not match:
-        raise SystemExit('invalid checksum record')
-    name = match[1]
-    if (name != 'metadata.tar.zst' and not name.startswith('mirror/')) or any(
-        part in ('', '.', '..') for part in name.split('/')
-    ) or name in seen:
-        raise SystemExit('invalid or duplicate checksum path: ' + name)
-    seen.add(name)
-if 'metadata.tar.zst' not in seen:
-    raise SystemExit('metadata checksum is missing')
-PYTHON
-    (cd -- "$package_input" && sha256sum -c --strict --quiet SHA256SUMS) || die 'package checksum verification failed'
-    expected_dir=metadata
-}
-
-validate_archive_members() {
-    local list=$1 member normalized count=0
-
-    tar -I zstd -tf "$archive" >"$list" || die 'could not list the core archive'
-    while IFS= read -r member; do
-        [[ -n "$member" ]] || die 'the core archive contains an empty member name'
-        normalized=${member%/}
-        case "$normalized" in
-            "$expected_dir"|"$expected_dir"/*) ;;
-            *) die "archive member escapes the expected root: $member" ;;
-        esac
-        case "/$normalized/" in
-            */../*|*/./*) die "archive member is not normalized: $member" ;;
-        esac
-        ((count += 1))
-    done <"$list"
-    ((count > 0)) || die 'the core archive is empty'
-}
-
-write_runtime_configuration() {
-    local root=$1 config_root="$1/runtime-config" yaml_mirror
-    yaml_quote() {
-        python3 -c 'import json, sys; print(json.dumps(sys.argv[1]))' "$1"
-    }
-    yaml_mirror="$(python3 -c 'import json, pathlib, sys; print(json.dumps(pathlib.Path(sys.argv[1]).as_uri()))' "$root/mirror")"
-    mkdir -p \
-        "$config_root" \
-        "$root/runtime-cache/bootstrap" \
-        "$root/runtime-cache/misc" \
-        "$root/runtime-cache/sources" \
-        "$root/runtime-stage" \
-        "$root/store"
-
-    cat >"$config_root/config.yaml" <<EOF
-config:
-  install_tree:
-    root: $(yaml_quote "$root/store")
-  build_stage:
-  - $(yaml_quote "$root/runtime-stage")
-  source_cache: $(yaml_quote "$root/runtime-cache/sources")
-  misc_cache: $(yaml_quote "$root/runtime-cache/misc")
-  checksum: true
-  dirty: false
-  locks: true
-EOF
-
-    cat >"$config_root/bootstrap.yaml" <<EOF
-bootstrap:
-  enable: true
-  root: $(yaml_quote "$root/runtime-cache/bootstrap")
-  sources:
-  - name: dev-env-binaries
-    metadata: $(yaml_quote "$root/bootstrap/metadata/binaries")
-  trusted:
-    dev-env-binaries: true
-    github-actions-v2: false
-    github-actions-v0.6: false
-    spack-install: false
-EOF
-
-    cat >"$config_root/mirrors.yaml" <<EOF
-mirrors:
-  dev-env:
-    url: $yaml_mirror
-    binary: true
-    source: false
-    signed: false
-EOF
-
-    cat >"$config_root/repos.yaml" <<EOF
-repos:
-  dev_env: $(yaml_quote "$root/repos/spack_repo/dev_env")
-  builtin: $(yaml_quote "$root/repos/spack-packages/repos/spack_repo/builtin")
-EOF
-
-    cat >"$config_root/packages.yaml" <<'EOF'
-packages:
-  all:
-    buildable: false
-EOF
-    unset -f yaml_quote
-}
-
-repair_clang_driver_configuration() {
-    local root=$1 clang_bin clang_real config line gcc_install_dir view_config
-
-    clang_bin="$root/view/bin/clang"
-    [[ -x "$clang_bin" ]] || die 'installed view does not contain clang'
-    clang_real="$(readlink -f -- "$clang_bin")"
-    [[ -x "$clang_real" ]] || die 'could not resolve the installed clang executable'
-
-    for config in \
-        "$(dirname -- "$clang_real")/clang.cfg" \
-        "$(dirname -- "$clang_real")/clang++.cfg"; do
-        [[ -f "$config" && ! -L "$config" ]] || continue
-        IFS= read -r line <"$config" || true
-        case "$line" in
-            --gcc-install-dir=/*) ;;
-            *) continue ;;
-        esac
-        [[ "$(wc -l <"$config" | tr -d '[:space:]')" == 1 ]] || continue
-
-        gcc_install_dir=${line#--gcc-install-dir=}
-        if [[ ! -d "$gcc_install_dir" ]]; then
-            view_config="$root/view/bin/$(basename -- "$config")"
-            if [[ -L "$view_config" && "$(readlink -f -- "$view_config")" == "$config" ]]; then
-                rm -f -- "$view_config"
-            fi
-            rm -f -- "$config"
-            printf 'Removed unavailable build-host GCC path from %s\n' "$config"
+# public/bin: every root's commands except private interpreters ------------
+public=$release/public
+rm -rf -- "$public.tmp"
+mkdir -p "$public.tmp/bin"
+while read -r name prefix; do
+    [[ " ${public_exclude_roots[*]} " != *" $name "* ]] || continue
+    for command in "$prefix"/bin/*; do
+        [[ -f "$command" && -x "$command" ]] || continue
+        command=${command##*/}
+        if [[ "$(head -c 2 -- "$prefix/bin/$command")" == '#!' ]]; then
+            IFS= read -r shebang <"$prefix/bin/$command" || true
+            [[ ! "$shebang" =~ ^\#!\ */usr/bin/env\ +python ]] || continue
         fi
+        [[ ! "$command" =~ $public_forbidden_re ]] || die "$name would expose $command"
+        [[ -e "$release/view/bin/$command" ]] || die "$command of $name is not in the view"
+        if [[ -L "$public.tmp/bin/$command" ]]; then
+            printf 'install: %s from %s is already public\n' "$command" "$name" >&2
+            continue
+        fi
+        # Into the view, where Python entry points use the view's interpreter.
+        ln -s "../../view/bin/$command" "$public.tmp/bin/$command"
     done
-}
+done <"$release/.roots"
+rm -rf -- "$public"
+mv -- "$public.tmp" "$public"
 
-install_core() {
-    local requested_prefix=$1 parent base prefix staging member_list
-
-    case "$requested_prefix" in
-        /*) ;;
-        *) die 'the installation prefix must be an absolute path' ;;
-    esac
-    [[ "$requested_prefix" != *$'\n'* && "$requested_prefix" != *$'\r'* ]] || \
-        die 'the installation prefix cannot contain a newline'
-    [[ "$requested_prefix" != / ]] || die 'the installation prefix cannot be /'
-    [[ ! -e "$requested_prefix" && ! -L "$requested_prefix" ]] || \
-        die "installation prefix already exists: $requested_prefix"
-
-    parent=$(dirname -- "$requested_prefix")
-    base=$(basename -- "$requested_prefix")
-    [[ "$base" != . && "$base" != .. && -n "$base" ]] || \
-        die 'invalid installation prefix'
-    mkdir -p "$parent"
-    parent="$(CDPATH= cd -- "$parent" && pwd -P)"
-    [[ -w "$parent" ]] || die "installation parent is not writable: $parent"
-    prefix="$parent/$base"
-    [[ ! -e "$prefix" && ! -L "$prefix" ]] || \
-        die "resolved installation prefix already exists: $prefix"
-
-    staging="$(mktemp -d "$parent/.dev-env-install.XXXXXXXX")"
-    install_cleanup_staging=$staging
-    install_cleanup_prefix=
-    member_list="$staging/.archive-members"
-    cleanup_install() {
-        local status=$?
-        if [[ -n "$install_cleanup_prefix" && -d "$install_cleanup_prefix" && ! -L "$install_cleanup_prefix" ]]; then
-            rm -rf -- "$install_cleanup_prefix"
-        fi
-        if [[ -n "$install_cleanup_staging" && -d "$install_cleanup_staging" && ! -L "$install_cleanup_staging" ]]; then
-            rm -rf -- "$install_cleanup_staging"
-        fi
-        return "$status"
-    }
-    trap cleanup_install EXIT
-
-    validate_archive_members "$member_list"
-    printf 'Extracting package metadata under %s\n' "$parent"
-    tar -I zstd --no-same-owner -xf "$archive" -C "$staging"
-    [[ -d "$staging/$expected_dir" && ! -L "$staging/$expected_dir" ]] || \
-        die 'the expected archive root was not extracted'
-    rm -f -- "$member_list"
-
-    mv "$staging/$expected_dir" "$prefix"
-    install_cleanup_prefix=$prefix
-    rmdir "$staging"
-    install_cleanup_staging=
-    ln -s "$package_input/mirror" "$prefix/mirror"
-
-    [[ -x "$prefix/spack/bin/spack" ]] || die 'bundled Spack executable is missing'
-    [[ -f "$prefix/environment/spack.lock" ]] || die 'bundled environment lock is missing'
-    [[ -f "$prefix/mirror/v3/layout.json" ]] || \
-        die 'bundled binary mirror is missing'
-    [[ -d "$prefix/bootstrap" ]] || die 'bundled bootstrap data is missing'
-    [[ -f "$prefix/repos/spack_repo/dev_env/repo.yaml" ]] || \
-        die 'bundled custom Spack repository is missing'
-
-    write_runtime_configuration "$prefix"
-    python3 - "$prefix/environment/spack.yaml" "$prefix/view" <<'PY'
-import json
-import pathlib
-import sys
-
-path = pathlib.Path(sys.argv[1])
-text = path.read_text()
-old = "  view: /opt/dev-env-root/view"
-if text.count(old) != 1:
-    raise SystemExit("expected exactly one build-time view path")
-new = "  view: " + json.dumps(sys.argv[2])
-updated = text.replace(old, new)
-path.write_text(updated)
-if updated.count(new) != 1:
-    raise SystemExit("could not set the target environment view path")
-PY
-
-    export SPACK_ROOT="$prefix/spack"
-    export SPACK_PYTHON="$target_python"
-    export SPACK_USER_CONFIG_PATH="$prefix/runtime-config"
-    export SPACK_SYSTEM_CONFIG_PATH="$prefix/runtime-system-config"
-    export PATH="$SPACK_ROOT/bin:/usr/bin:/bin"
-    export PIP_NO_INDEX=1 PIP_DISABLE_PIP_VERSION_CHECK=1
-    export npm_config_offline=true npm_config_update_notifier=false
-    export CARGO_NET_OFFLINE=true GIT_TERMINAL_PROMPT=0
-    unset HTTP_PROXY HTTPS_PROXY NO_PROXY http_proxy https_proxy no_proxy ALL_PROXY all_proxy
-    mkdir -p "$SPACK_SYSTEM_CONFIG_PATH"
-
-    printf '%s\n' 'Installing the locked environment from the local binary mirror'
-    "$SPACK_ROOT/bin/spack" --version
-    "$SPACK_ROOT/bin/spack" -e "$prefix/environment" install \
-        --only-concrete \
-        --use-buildcache=only \
-        --no-check-signature \
-        --fail-fast \
-        --show-log-on-error
-    "$SPACK_ROOT/bin/spack" -e "$prefix/environment" env view regenerate
-    # Spack's LLVM package records its build compiler as --gcc-install-dir in
-    # clang.cfg.  Minimal EL8 targets intentionally need no system compiler;
-    # remove that single generated hint when the recorded directory is absent.
-    repair_clang_driver_configuration "$prefix"
-    bash "$prefix/scripts/_assemble-runtime.sh" "$prefix"
-
-    [[ -f "$prefix/activate.sh" ]] || die 'activation script is missing'
-    # shellcheck source=/dev/null
-    source "$prefix/activate.sh"
-    [[ "$DEV_ENV_ROOT" == "$prefix" ]] || die 'activation selected the wrong root'
-    [[ -x "$prefix/view/bin/nvim" ]] || die 'installed view does not contain nvim'
-
-    printf '%s\n' 'binary-cache-only' >"$prefix/.dotfiles-linux-install"
-
-    trap - EXIT
-    unset install_cleanup_prefix install_cleanup_staging
-    printf '\nInstallation complete. Activate with:\n  source %q\n' \
-        "$prefix/activate.sh"
-}
-
-main() {
-    local command_name
-    case "${1:-}" in
-        -h|--help|help)
-            usage
-            return 0
-            ;;
-    esac
-    if (($# < 1 || $# > 2)); then
-        usage >&2
-        return 2
-    fi
-
-    for command_name in bash find getconf mktemp python3 readlink sha256sum tar tr uname wc zstd; do
-        require_target_command "$command_name"
-    done
-    target_python="$(command -v python3)"
-    verify_target
-    package_input=${2:-$bundle_root}
-    select_inputs
-    install_core "$1"
-}
-
-if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
-    main "$@"
-fi
+mkdir -p "${dev_env_link%/*}"
+[[ -L "$dev_env_link" || ! -e "$dev_env_link" ]] || die "$dev_env_link exists and is not a link"
+ln -sfn -- "$release" "$dev_env_link"
+printf 'install: %s is current (%s)\n' "$id" "$dev_env_link"

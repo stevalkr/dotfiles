@@ -36,14 +36,16 @@ set_global_default AppleShowAllExtensions -bool true 1
 set_global_default AppleSpacesSwitchOnActivate -bool false 0
 set_global_default AppleInterfaceStyleSwitchesAutomatically -bool true 1
 
-timezone=$(systemsetup -gettimezone 2>/dev/null | sed 's/^Time Zone: //')
+# systemsetup -get* requires root, so read state directly.
+timezone=$(readlink /etc/localtime | sed 's|.*/zoneinfo/||')
 
 need_sudo=false
 $register_fish && need_sudo=true
 [[ "$timezone" == 'Asia/Singapore' ]] || need_sudo=true
 if $enable_remote_login; then
-  remote_login=$(systemsetup -getremotelogin 2>/dev/null || true)
-  [[ "$remote_login" == 'Remote Login: On' ]] || need_sudo=true
+  remote_login=off
+  launchctl print-disabled system | grep -Fq '"com.openssh.sshd" => enabled' && remote_login=on
+  [[ "$remote_login" == on ]] || need_sudo=true
 fi
 
 if $need_sudo; then
@@ -60,10 +62,11 @@ if [[ "$current_shell" != "$fish_path" ]]; then
 fi
 
 if [[ "$timezone" != 'Asia/Singapore' ]]; then
-  sudo systemsetup -settimezone Asia/Singapore >/dev/null
+  # systemsetup logs a harmless "Error:-99 ... InternetServices.m" on recent macOS.
+  sudo systemsetup -settimezone Asia/Singapore >/dev/null 2>&1
 fi
 
-if $enable_remote_login && [[ "${remote_login:-}" != 'Remote Login: On' ]]; then
+if $enable_remote_login && [[ "$remote_login" != on ]]; then
   sudo systemsetup -setremotelogin on >/dev/null
 fi
 

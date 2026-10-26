@@ -1,0 +1,23 @@
+packages:
+  all:
+    require: "target=x86_64"
+  c:
+    prefer: ["gcc@8.5.0"]
+  cxx:
+    prefer: ["gcc@8.5.0"]
+  fortran:
+    prefer: ["gcc@8.5.0"]
+  gcc:
+    externals:
+    - spec: "gcc@8.5.0 languages='c,c++,fortran'"
+      prefix: /usr
+      extra_attributes:
+        compilers:
+          c: /usr/bin/gcc
+          cxx: /usr/bin/g++
+          fortran: /usr/bin/gfortran
+  glibc:
+    externals:
+    - spec: glibc@2.28
+      prefix: /usr
+    buildable: false

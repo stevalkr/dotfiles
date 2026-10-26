@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# shellcheck source=lib.sh
+source "$(dirname -- "${BASH_SOURCE[0]}")/lib.sh"
+
+case "${1:-}" in
+    -h|--help)
+        printf '%s\n' 'Usage: ./linux/prepare' \
+            'Install the built packages in a container home, run Neovim to build its' \
+            'plugins and parsers, and pack them to out/dist/local.tar.zst.'
+        exit 0 ;;
+    "") ;;
+    *) die 'prepare takes no arguments' ;;
+esac
+dotfiles=${linux_root%/linux}
+packages=$dist/packages
+
+in_container() {
+    local state id existing
+    dev_env_init
+    state=$(mktemp)
+    mirror_state state --mirror "$packages/mirror" \
+        "spack.tar.zst=$packages/spack.tar.zst" "env.tar.zst=$packages/env.tar.zst" >"$state"
+    id=
+    for existing in "$dev_env"/releases/*/state.sha256; do
+        [[ -f "$existing" ]] && cmp -s "$existing" "$state" && id=$(basename -- "$(dirname -- "$existing")")
+    done
+    if [[ -z "$id" ]]; then
+        id=$(release_id "$state")
+        mirror_state ingest "$state" "$packages/mirror" "$dev_env/mirror"
+        "$linux_root/scripts/release.sh" "$id" "$state" "$packages"
+    fi
+    rm -f -- "$state"
+
+    "$linux_root/install" "$id"
+    "$dotfiles/bootstrap"
+    # shellcheck source=home/.config/dev-env/activate.sh
+    source "$HOME/.config/dev-env/activate.sh"
+    # Parser builds would otherwise embed the prepare home (assert __FILE__).
+    export CFLAGS="-ffile-prefix-map=$HOME/="
+    printf '\n%s\n' 'prepare: wait for Neovim plugin and parser builds to finish, then quit.'
+    nvim
+    # Startup errors (e.g. a plugin whose install timed out) do not set the exit code.
+    nvim --headless -c 'if v:errmsg != "" | cquit | endif' -c qa ||
+        die 'Neovim reported a startup error; run ./linux/prepare again'
+    python3 "$linux_root/scripts/pack-local.py" "$HOME" "$dist/local.tar.zst"
+}
+
+if [[ "${DEV_ENV_PREPARE:-}" == 1 ]]; then
+    in_container
+    exit
+fi
+
+need docker git
+[[ -f "$packages/spack.tar.zst" && -f "$packages/env.tar.zst" && -f "$packages/mirror/v3/layout.json" ]] ||
+    die 'run ./linux/build first'
+if git -C "$dotfiles" submodule status --recursive | grep -q '^[-U]'; then
+    die 'populate the submodules first'
+fi
+ensure_image
+# Fresh every run; kept afterwards for inspection.
+rm -rf -- "$cache/prepare-home"
+mkdir -p "$cache/prepare-home"
+tty=(--interactive)
+[[ -t 0 && -t 1 ]] && tty+=(--tty)
+# The checkout is writable: Neovim updates nvim-pack-lock.json in place.
+docker_run "${tty[@]}" \
+    --volume "$dotfiles:/opt/dotfiles" \
+    --volume "$cache/prepare-home:/opt/prepare-home" \
+    --env HOME=/opt/prepare-home \
+    --env TERM="${TERM:-xterm-256color}" \
+    --env DEV_ENV_PREPARE=1 \
+    -- bash /opt/dotfiles/linux/prepare
+printf 'prepare: %s\n' "$dist/local.tar.zst"

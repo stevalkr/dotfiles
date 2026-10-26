@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+wezterm=$HOME/.local/share/dev-env/view/bin/wezterm
+[[ -x "$wezterm" ]] || { echo 'wezterm: run ./linux/install first' >&2; exit 127; }
+
+if [[ -z "${XDG_RUNTIME_DIR:-}" ]]; then
+    runtime_base="${TMPDIR:-/tmp}/dev-env-runtime-$(id -u)"
+    if [[ -e "$runtime_base" ]] && { [[ ! -d "$runtime_base" ]] || [[ -L "$runtime_base" ]] || [[ ! -O "$runtime_base" ]]; }; then
+        printf 'dev-env: unsafe runtime directory: %s\n' "$runtime_base" >&2
+        exit 1
+    fi
+    (umask 077 && mkdir -p "$runtime_base")
+    chmod 700 "$runtime_base"
+    export XDG_RUNTIME_DIR="$runtime_base"
+fi
+
+case "${LC_ALL:-${LC_CTYPE:-${LANG:-}}}" in
+    ""|C|POSIX) export LC_ALL=C.UTF-8 ;;
+esac
+
+exec "$wezterm" "$@"

@@ -1,51 +1,88 @@
 # Dotfiles
 
-GNU Stow manages shared configuration in `home/` and platform configuration in
-`macos/home/` or `linux/home/`. Homebrew provisions macOS; the [Linux workflow](linux/README.md)
-builds portable packages and prepares runtime data for offline servers.
+Keep the checkout at a permanent path. Run commands from its root.
 
-For connected macOS provisioning:
+## macOS
+
+Requires Apple Silicon, Homebrew at `/opt/homebrew`, and internet access.
 
 ```sh
+git submodule update --init --recursive
 ./bootstrap
-./macos/test
+nvim # Wait for plugin/parser installation, then quit.
 ```
 
-Use `./bootstrap --enable-remote-login` to enable macOS Remote Login. Bootstrap
-initializes submodules, installs Homebrew dependencies and Neovim runtimes,
-prepares Fisher, applies macOS settings, backs up managed configuration, and
-stows it. Config snapshots go under `~/.dotfiles-backup/`; SSH configs receive
-adjacent `.bak` files.
+To enable Remote Login, use `./bootstrap --enable-remote-login`.
+Change packages in `macos/Brewfile`, then rerun `./macos/bootstrap`.
 
-To activate or restow configuration on either platform:
+## Linux
+
+Packages are built on a connected builder and installed on an offline server
+(x86-64, glibc 2.28+). Configs are synced by hand and stowed by `./bootstrap`.
+
+### Builder
+
+Requires Docker with `linux/amd64` support, Git, Bash, Python 3, GNU tar,
+coreutils, and zstd. To use another machine, sync the checkout to it; keep its
+`linux/out/` there:
 
 ```sh
-./activate
+git submodule update --init --recursive
+rsync -a --delete --exclude /linux/out/ ./ builder:~/dotfiles/
+ssh -t builder
+cd ~/dotfiles
 ```
-
-Activation is offline: it only runs Stow. Populate submodules before transferring
-the complete checkout. On Linux, install packages and restore runtime data first,
-then source the installed prefix's `activate.sh` to make Stow available.
-
-Platform Neovim wrappers in `~/.local/bin` select providers before `init.lua` runs.
-macOS providers and Node tools live under `${XDG_DATA_HOME:-~/.local/share}/nvim`;
-Linux uses its activated package prefix. Private interpreter paths are added to
-Neovim's process environment. Fisher plugins and management data live under
-`${XDG_DATA_HOME:-~/.local/share}/fisher`; Fish startup does not update plugins.
-Connected macOS provisioning moves the former `.config/fish/fisher` installation
-to that location. To refresh Fisher on a connected machine, run
-`./scripts/prepare-fisher`.
 
 ```sh
-uv pip install --python "$VIRTUAL_ENV/bin/python" ipykernel
-"$VIRTUAL_ENV/bin/python" -m ipykernel install --user \
-  --name "$(basename "$VIRTUAL_ENV")" \
-  --display-name "Python ($(basename "$VIRTUAL_ENV"))"
+./linux/build    # build packages and release files
+./linux/prepare  # only when Neovim data must change; quit nvim after its builds
+./linux/bundle   # full archive in linux/out/bundle/
+./linux/bundle --base <id>  # only what the server's release <id> lacks
+./linux/bundle --list       # recorded ids
 ```
 
-To review or remove Homebrew packages outside the Brewfile:
+`prepare` updates `home/.config/nvim/nvim-pack-lock.json`; commit it in the
+submodule.
+
+`prepare` starts from an empty container home each run, so plugins are cloned
+again; rerun it if the network cuts it short.
+
+`build` and `prepare` pass `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY` to their
+containers.
+
+Copy the archive and the checkout (without `linux/out/`) to the server.
+
+### Server
+
+Requires Linux x86-64, glibc 2.28+, a non-root user, Bash, Python 3.6+, GNU tar,
+coreutils, findutils, and zstd.
 
 ```sh
-brew bundle cleanup --file macos/Brewfile
-brew bundle cleanup --force --file macos/Brewfile
+./linux/unbundle /path/to/dev-env-<id>.tar
+./linux/install       # newest release; or ./linux/install <id>
+./bootstrap
 ```
+
+Add this line to `~/.bashrc`:
+
+```sh
+source "$HOME/.config/dev-env/activate.sh"
+```
+
+To revert, point the link at an older release and rerun `./bootstrap`:
+
+```sh
+ln -sfn "$PWD/linux/out/dev-env/releases/<id>" ~/.local/share/dev-env
+./bootstrap
+```
+
+To keep only the current release (or `<id>`) and free space, run
+`./linux/compact [<id>]`. Also run it after a Spack update. Later incremental
+bundles must use the kept release as their base.
+
+On the builder, `rm -rf linux/out/cache` frees space; the next build reuses
+`linux/out/dist/`.
+
+To relink configs only (no packages or backups), use `./bootstrap --stow-only`
+(on Linux, after `./linux/install`).
+

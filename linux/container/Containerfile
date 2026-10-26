@@ -1,0 +1,37 @@
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+
+ARG IMAGE_HASH
+LABEL dev-env.image-hash="$IMAGE_HASH"
+
+COPY rocky-8.7-vault.repo /etc/yum.repos.d/dev-env-rocky-8.7.repo
+
+# Spack, the recipes and the outputs are mounted at run time.
+RUN sed -i 's/^enabled=1/enabled=0/' /etc/yum.repos.d/Rocky-*.repo \
+    && dnf -y install \
+        bzip2 \
+        ca-certificates \
+        curl \
+        diffutils \
+        file \
+        findutils \
+        gcc \
+        gcc-c++ \
+        gcc-gfortran \
+        git \
+        glibc-devel \
+        gnupg2 \
+        gzip \
+        make \
+        patch \
+        python3 \
+        tar \
+        unzip \
+        util-linux \
+        which \
+        xz \
+        zstd \
+    && dnf clean all \
+    && rm -rf /var/cache/dnf
+
+ENV PYTHONDONTWRITEBYTECODE=1

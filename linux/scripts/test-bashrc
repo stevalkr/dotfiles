@@ -1,2 +1,0 @@
-source "$LINUX_TEST_PREFIX/activate.sh"
-PS1='linux-preparation:\w\$ '

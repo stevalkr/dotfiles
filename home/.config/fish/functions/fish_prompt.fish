@@ -33,7 +33,14 @@ function fish_prompt --description="Write out the prompt"
     set_color magenta
     echo -n (prompt_hostname)
     set_color normal
-    printf ' in '
+
+    if test -n "$ZMX_SESSION"
+        printf ' in '
+        set_color brred
+        printf '%s' $ZMX_SESSION
+        set_color normal
+    end
+    printf ' under '
 
     set_color $color_cwd
     printf '%s' (prompt_pwd -D 3)

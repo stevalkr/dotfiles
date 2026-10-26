@@ -1,8 +1,0 @@
-#!/usr/bin/env bash
-set -euo pipefail
-
-runtime_bin="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-dev_env_root="$(CDPATH= cd -- "$runtime_bin/.." && pwd)"
-tool="$(basename -- "${BASH_SOURCE[0]}")"
-
-exec "$dev_env_root/view/bin/node" "$dev_env_root/view/bin/$tool" "$@"

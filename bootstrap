@@ -4,36 +4,58 @@ set -euo pipefail
 repo=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
 home_package="$repo/home"
 enable_remote_login=false
+stow_only=false
 usage() {
-  echo 'usage: ./bootstrap [--enable-remote-login]'
+  echo 'usage: ./bootstrap [--enable-remote-login | --stow-only]'
 }
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --enable-remote-login) enable_remote_login=true ;;
+    --stow-only) stow_only=true ;;
     -h|--help) usage; exit 0 ;;
     *) echo "unknown option: $1" >&2; usage >&2; exit 2 ;;
   esac
   shift
 done
+if $stow_only && $enable_remote_login; then
+  echo '--stow-only cannot be combined with --enable-remote-login' >&2; exit 2
+fi
 
 case "$(uname -s)" in
   Darwin)
     [[ "$(uname -m)" == arm64 ]] || { echo 'macOS requires Apple Silicon.' >&2; exit 2; }
     platform=macos
-    if $enable_remote_login; then
+    stow=stow
+    if $stow_only; then
+      :
+    elif $enable_remote_login; then
       "$repo/macos/bootstrap" --enable-remote-login
     else
       "$repo/macos/bootstrap"
     fi
     export PATH="/opt/homebrew/bin:$PATH"
+    command -v stow >/dev/null 2>&1 || { echo 'Install Stow before running bootstrap.' >&2; exit 1; }
     ;;
   Linux)
     $enable_remote_login && { echo '--enable-remote-login is only supported on macOS' >&2; exit 2; }
     platform=linux
+    dev_env="$HOME/.local/share/dev-env"
+    stow="$dev_env/public/bin/stow"
+    [[ -x "$stow" ]] || { echo 'Run ./linux/install first.' >&2; exit 1; }
     ;;
   *) echo 'Unsupported platform' >&2; exit 2 ;;
 esac
-command -v stow >/dev/null 2>&1 || { echo 'Install Stow before running bootstrap.' >&2; exit 1; }
+
+restow() {
+  "$stow" --restow --no-folding --dir "$repo" --target "$HOME" home
+  "$stow" --restow --no-folding --dir "$repo/$platform" --target "$HOME" home
+}
+
+if $stow_only; then
+  restow
+  echo 'Configs restowed.'
+  exit 0
+fi
 
 mkdir -p "$HOME/.dotfiles-backup"
 backup_root=$(mktemp -d "$HOME/.dotfiles-backup/$(date +%Y%m%d-%H%M%S).XXXXXX")
@@ -77,13 +99,42 @@ done
 
 rm -f -- "$HOME/.local/bin/multiplexer"
 
+# Prepared Neovim data of the current release, replaced when its checksum changes.
+restore_local_data() {
+  local archive="$dev_env/local.tar.zst" nvim="$HOME/.local/share/nvim"
+  local record="$nvim/.dev-env-local.sha256" sha staging
+  [[ -f "$archive" ]] || return 0
+  sha=$(awk '$2 == "local.tar.zst" { print $1 }' "$dev_env/state.sha256")
+  [[ -n "$sha" ]] || { echo 'local.tar.zst is not in the release state' >&2; exit 1; }
+  [[ -f "$record" && "$(<"$record")" == "$sha" ]] && return 0
+  if tar -I zstd -tf "$archive" | grep -Ev '^(\.local/|\.local/share/|\.local/share/nvim(/.*)?)$' | grep -q . ||
+     tar -I zstd -tf "$archive" | grep -Eq '(^|/)\.\.(/|$)'; then
+    echo "unexpected paths in $archive" >&2; exit 1
+  fi
+  mkdir -p "$HOME/.local/share"
+  staging=$(mktemp -d "$HOME/.local/share/.nvim-local.XXXXXX")
+  tar -I zstd --no-same-owner -xf "$archive" -C "$staging"
+  if [[ -e "$nvim" || -L "$nvim" ]]; then
+    mkdir -p "$backup_root/.local/share"
+    mv -- "$nvim" "$backup_root/.local/share/nvim"
+    printf 'backed up %s\n' "$nvim"
+    backed_up=true
+  fi
+  mv -- "$staging/.local/share/nvim" "$nvim"
+  rm -rf -- "$staging"
+  printf '%s\n' "$sha" >"$record"
+  echo "restored Neovim data from $archive"
+}
+if [[ "$platform" == linux ]]; then
+  restore_local_data
+fi
+
 if $backed_up; then
   echo "Configuration snapshots were copied to $backup_root"
 else
   rmdir "$backup_root" 2>/dev/null || true
 fi
 
-stow --restow --no-folding --dir "$repo" --target "$HOME" home
-stow --restow --no-folding --dir "$repo/$platform" --target "$HOME" home
+restow
 
 echo 'Bootstrap completed successfully.'

@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# shellcheck source=lib.sh
+source "$(dirname -- "${BASH_SOURCE[0]}")/lib.sh"
+
+usage() {
+    printf '%s\n' 'Usage: ./linux/bundle [--base <id>]' '       ./linux/bundle --list' \
+        'Write out/bundle/dev-env-<id>.tar: everything, or only what <id> lacks.'
+}
+base=
+case "${1:-}" in
+    -h|--help) usage; exit 0 ;;
+    --list)
+        (($# == 1)) || die '--list takes no arguments'
+        for state in "$states"/*.sha256; do
+            [[ -f "$state" ]] || continue
+            printf '%s  %s entries\n' "$(basename -- "$state" .sha256)" "$(wc -l <"$state" | tr -d ' ')"
+        done
+        exit 0 ;;
+    --base)
+        (($# == 2)) || die '--base takes one id'
+        base=$2
+        [[ -f "$states/$base.sha256" ]] || die "no recorded state $base; see ./linux/bundle --list" ;;
+    "") ;;
+    *) usage >&2; exit 2 ;;
+esac
+need python3 sha256sum tar
+packages=$dist/packages
+[[ -f "$packages/spack.tar.zst" && -f "$packages/env.tar.zst" ]] || die 'run ./linux/build first'
+[[ -f "$dist/local.tar.zst" ]] || die 'run ./linux/prepare first'
+
+mkdir -p "$bundles" "$states"
+work=$(mktemp -d "$bundles/.tmp.XXXXXXXX")
+trap 'rm -rf -- "$work"' EXIT
+files=("spack.tar.zst=$packages/spack.tar.zst" "env.tar.zst=$packages/env.tar.zst"
+    "local.tar.zst=$dist/local.tar.zst")
+mirror_state state --mirror "$packages/mirror" "${files[@]}" >"$work/state.sha256"
+
+if [[ -n "$base" ]] && cmp -s "$states/$base.sha256" "$work/state.sha256"; then
+    die "nothing changed since $base"
+fi
+# Always a new id, even for a state bundled before: the newest id is the default
+# release to install.
+id=$(release_id "$work/state.sha256")
+printf '%s\n' "$id" >"$work/id"
+
+if [[ -n "$base" ]]; then
+    printf '%s\n' "$base" >"$work/base"
+    mirror_state diff "$states/$base.sha256" "$work/state.sha256" >"$work/objects.list"
+    name=dev-env-$id-from-$base.tar
+else
+    cut -c67- "$work/state.sha256" >"$work/objects.list"
+    name=dev-env-$id.tar
+fi
+mirror_state stage --mirror "$packages/mirror" "$work/objects.list" "$work/objects" "${files[@]}"
+mkdir -p "$work/objects"
+members=(id state.sha256 objects)
+[[ -z "$base" ]] || members+=(base)
+tar -cf "$work/$name" -C "$work" "${members[@]}"
+mv -- "$work/$name" "$bundles/$name"
+cp -- "$work/state.sha256" "$states/$id.sha256"
+printf 'bundle: %s (%s of %s entries)\n' "$bundles/$name" \
+    "$(wc -l <"$work/objects.list" | tr -d ' ')" "$(wc -l <"$work/state.sha256" | tr -d ' ')"

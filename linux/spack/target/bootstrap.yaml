@@ -1,0 +1,4 @@
+# Installs come only from the release mirror; fail rather than fetch tools.
+bootstrap:
+  enable: false
+  root: $spack/../../../cache/bootstrap

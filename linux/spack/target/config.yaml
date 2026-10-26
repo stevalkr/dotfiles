@@ -1,0 +1,13 @@
+# $spack is releases/<id>/spack; ../../.. is out/dev-env.
+config:
+  install_tree:
+    root: $spack/../../../store
+    projections:
+      all: "{architecture.platform}-{architecture.target}/{name}-{version}-{hash}"
+  build_stage:
+  - $spack/../../../cache/stage
+  source_cache: $spack/../../../cache/sources
+  misc_cache: $spack/../../../cache/misc
+  checksum: true
+  dirty: false
+  locks: true

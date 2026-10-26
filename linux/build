@@ -1,134 +1,54 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# shellcheck source=lib.sh
+source "$(dirname -- "${BASH_SOURCE[0]}")/lib.sh"
 
-# shellcheck source=_common.sh
-source "$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/scripts/_common.sh"
+case "${1:-}" in
+    -h|--help)
+        printf '%s\n' 'Usage: ./linux/build' \
+            'Build the packages, push the release mirror and write the release files.'
+        exit 0 ;;
+    "") ;;
+    *) die 'build takes no arguments' ;;
+esac
+need docker git sha256sum
 
-usage() {
-    printf '%s\n' 'Usage: ./linux/build'
-}
-
-container_build() {
-    if (($# != 0)) || [[ ! -x /opt/spack/bin/spack ]]; then
-        printf 'dev-env: invalid container build invocation\n' >&2
-        exit 2
+# clone_pinned <name> <url> <tag> <commit>
+clone_pinned() {
+    local destination=$cache/src/$1 url=$2 tag=$3 commit=$4
+    if [[ ! -d "$destination/.git" ]]; then
+        [[ ! -e "$destination" ]] || die "$destination exists but is not a Git checkout"
+        git clone --depth 1 --branch "$tag" "$url" "$destination"
     fi
-
-    enter_container_user "$@"
-
-    local container_project=/opt/dev-env
-    local container_environment=/opt/dev-env-root
-    local container_manifests="$manifest_root"
-    mkdir -p "$spack_environment"
-    cp "$container_project/spack.yaml" "$spack_environment/spack.yaml"
-    rm -f "$container_manifests/build-completed-at.txt"
-
-    mkdir -p "$container_environment" "$container_manifests"
-
-    spack --version
-    spack config get config
-    spack arch
-
-    source /etc/os-release
-    [[ "$ID" == rocky && "$VERSION_ID" == 8.7 ]] || {
-        printf 'dev-env: expected Rocky Linux 8.7, found %s %s\n' "$ID" "$VERSION_ID" >&2
-        exit 1
-    }
-    [[ "$(getconf GNU_LIBC_VERSION)" == 'glibc 2.28' ]] || {
-        printf 'dev-env: expected glibc 2.28, found %s\n' "$(getconf GNU_LIBC_VERSION)" >&2
-        exit 1
-    }
-    [[ "$(uname -m)" == x86_64 ]] || {
-        printf 'dev-env: expected x86_64, found %s\n' "$(uname -m)" >&2
-        exit 1
-    }
-    [[ "$(gcc -dumpfullversion -dumpversion)" == 8.5.0 ]] || {
-        printf 'dev-env: expected GCC 8.5.0, found %s\n' "$(gcc -dumpfullversion -dumpversion)" >&2
-        exit 1
-    }
-
-    spack clean --misc-cache
-    spack -e "$spack_environment" concretize --force
-
-    spack -e "$spack_environment" install --fail-fast --show-log-on-error
-    spack -e "$spack_environment" env view regenerate
-    bash "$container_project/scripts/_assemble-runtime.sh" "$container_environment"
-
-    # Preserve the demonstrated LLVM RPATH repair before binary-cache creation.
-    local llvm_prefix patchelf_bin
-    llvm_prefix=$(spack -e "$spack_environment" location -i llvm)
-    patchelf_bin=$(find /opt/padded-spack-store -type f -path '*/patchelf-*/bin/patchelf' -print -quit)
-    [[ -n "$patchelf_bin" ]] || { echo 'build: patchelf is missing' >&2; return 1; }
-    PATH="$(dirname -- "$patchelf_bin"):$PATH" \
-        bash "$script_dir/_patch-elf.sh" repair-llvm-22.1.5 "$llvm_prefix"
-
-    date -u +'%Y-%m-%dT%H:%M:%SZ' >"$container_manifests/build-completed-at.txt"
-    printf 'Build complete. Concrete lock: %s/spack.lock\n' "$spack_environment"
-}
-
-host_build() {
-    case "${1:-}" in
-        -h|--help|help)
-            usage
-            exit 0
-            ;;
-        "") ;;
-        *)
-            usage >&2
-            exit 2
-            ;;
-    esac
-
-    require_command docker
-    rm -f "$manifest_root/build-completed-at.txt"
-    "$script_dir/_bootstrap.sh"
-    prepare_output_tree
-    prepare_proxy_environment
-    prepare_docker_network
-
-    local log="$log_root/build.log"
-    (cd "$project_root" && find Containerfile.build container config repo scripts build pack spack.yaml -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum) >"$manifest_root/build-inputs.sha256"
-    local status
-    printf 'dev-env: build state: %s\n' "$build_root"
-    printf 'dev-env: full build log: %s\n' "$log"
-
-    set +e
-    docker run --rm \
-        --platform "$BUILD_PLATFORM" \
-        "${docker_network_run_args[@]}" \
-        --security-opt label=disable \
-        --security-opt seccomp=unconfined \
-        --volume "$project_root:/opt/dev-env" \
-        --volume "$cache_root/bootstrap:/opt/dev-env-bootstrap" \
-        --volume "$build_root/stage:/opt/dev-env-build-stage" \
-        --volume "$cache_root/misc:/opt/dev-env-misc-cache" \
-        --volume "$environment_root:/opt/dev-env-root" \
-        --volume "$cache_root/sources:/opt/dev-env-source-cache" \
-        --volume "$build_root/store:/opt/padded-spack-store" \
-        --env DEV_ENV_CONTAINER_BUILD=1 \
-        --env DEV_ENV_HOST_GID="$(id -g)" \
-        --env DEV_ENV_HOST_UID="$(id -u)" \
-        --env HOME=/opt/dev-env/out/build/home \
-        "${docker_proxy_run_args[@]}" \
-        --env GIT_CONFIG_COUNT=2 \
-        --env GIT_CONFIG_KEY_0=safe.directory \
-        --env GIT_CONFIG_VALUE_0=/opt/spack \
-        --env GIT_CONFIG_KEY_1=safe.directory \
-        --env GIT_CONFIG_VALUE_1=/opt/spack-packages \
-        "$builder_image" \
-        bash /opt/dev-env/build \
-        2>&1 | tee "$log"
-    status=${PIPESTATUS[0]}
-    set -e
-    if ((status != 0)); then
-        return "$status"
+    [[ -z "$(git -C "$destination" status --porcelain)" ]] || die "modified checkout: $destination"
+    if [[ "$(git -C "$destination" rev-parse HEAD)" != "$commit" ]]; then
+        [[ "$(git -C "$destination" remote get-url origin)" == "$url" ]] ||
+            die "$destination has an unexpected origin"
+        git -C "$destination" fetch --depth 1 origin "$commit"
+        git -C "$destination" checkout --detach "$commit"
     fi
-
-    printf 'Build complete. Run ./linux/pack to create offline inputs.\n'
+    [[ "$(git -C "$destination" rev-parse HEAD)" == "$commit" ]] || die "$destination is not at $commit"
 }
 
-if [[ "${DEV_ENV_CONTAINER_BUILD:-}" == 1 ]]; then
-    container_build "$@"
-else
-    host_build "$@"
-fi
+clone_pinned spack "$SPACK_GIT_URL" "$SPACK_TAG" "$SPACK_COMMIT"
+clone_pinned spack-packages "$SPACK_PACKAGES_GIT_URL" "$SPACK_PACKAGES_TAG" "$SPACK_PACKAGES_COMMIT"
+ensure_image
+
+mkdir -p "$cache"/{store,stage,sources,misc,bootstrap,home,env} "$dist/packages/mirror"
+printf 'build: log %s\n' "$cache/build.log"
+docker_run \
+    --volume "$linux_root/spack:/opt/dev-env/spack:ro" \
+    --volume "$linux_root/scripts:/opt/dev-env/scripts:ro" \
+    --volume "$cache/src/spack:/opt/spack:ro" \
+    --volume "$cache/src/spack-packages:/opt/spack-packages:ro" \
+    --volume "$cache/store:/opt/padded-spack-store" \
+    --volume "$cache/stage:/opt/dev-env-build-stage" \
+    --volume "$cache/sources:/opt/dev-env-source-cache" \
+    --volume "$cache/misc:/opt/dev-env-misc-cache" \
+    --volume "$cache/bootstrap:/opt/dev-env-bootstrap" \
+    --volume "$cache/home:/opt/dev-env-home" \
+    --volume "$cache/env:/opt/dev-env-env" \
+    --volume "$dist/packages:/opt/dev-env-dist/packages" \
+    --env HOME=/opt/dev-env-home \
+    -- bash /opt/dev-env/scripts/build.sh 2>&1 | tee "$cache/build.log"
+printf 'build: release files in %s\n' "$dist/packages"

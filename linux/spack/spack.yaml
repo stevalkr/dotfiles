@@ -1,0 +1,48 @@
+# Root specs are exact selections. A release is this environment plus its lock;
+# the view is created next to them on the target.
+spack:
+  specs:
+  - llvm@=22.1.5 +clang +lld ~lldb ~flang ~mlir openmp=runtime ~offload ~libomptarget ~cuda build_type=Release
+  - neovim@=0.13.0-dev.20260922
+  - tmux@=3.8 ~static ~jemalloc +utf8proc
+  - zmx@=0.8.1
+  - wezterm@=20261005.3725482
+  - python@=3.11.15 +shared +ssl +sqlite3 +readline +bz2 +lzma +zlib ~tkinter ~tests
+  - py-pyink@=26.5.1
+  - py-pynvim@=0.4.3
+  - py-pillow@=12.2.0 +zlib +jpeg +tiff +webp +freetype +lcms +jpeg2000 ~raqm ~imagequant ~xcb ~avif ^libwebp+libwebpmux+libwebpdemux
+  - py-nbformat@=5.10.4
+  - py-jupytext@=1.16.0
+  - py-jupyter-client@=8.8.0
+  - py-codespell@=2.4.1
+  # Node needs a newer compiler, built against the same EL8 glibc.
+  - node-js@=26.3.0 +openssl +zlib ~doc %gcc@13.4.0
+  - node-neovim@=5.5.0
+  - markdownlint-cli@=0.49.1
+  - pyright@=1.1.414
+  - fd@=10.4.2
+  - ripgrep@=15.1.0 +pcre2
+  - bat@=0.24.0
+  - tree-sitter@=0.27.0-dev.20260821 +cli
+  - fzf@=0.73.1 ~vim
+  - imagemagick@=7.1.1-39 +zlib ~ghostscript ~rsvg
+  - stow@=2.4.1
+  - direnv@=2.37.1
+  - zoxide@=0.9.8
+  - py-cmakelang@=0.6.13
+  - prettierd@=0.29.0
+  - py-cairosvg@=2.7.1
+  - py-pyperclip@=1.11.0
+  - fish@=4.2.0 ~docs
+  - bubblewrap@=0.11.0
+  - rocketchat-tui@=2022.11.21
+  - monaspace-nerd-fonts@=1.400
+  - claude-code@=2.1.308
+  view: view
+  concretizer:
+    unify: true
+    # Reuse builds of builtin recipes, but never an older build of our own:
+    # their fixes would be lost (Spack reuses specs with other package hashes).
+    reuse:
+      roots: true
+      exclude: ["namespace=dev_env"]
