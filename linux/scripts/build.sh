@@ -40,13 +40,28 @@ for spec in spack.environment.active_environment().all_specs():
         if spec._package_hash != spec.package.content_hash():
             print(spec.dag_hash())
 EOF_PY
-for attempt in 1 2; do
-    spack -e "$env_dir" concretize --force
-    spack -e "$env_dir" python "$stale.py" >"$stale"
-    [[ -s "$stale" ]] || break
-    ((attempt == 1)) || die "still built from older dev_env recipes: $(tr '\n' ' ' <"$stale")"
-    sed 's|^|/|' "$stale" | xargs spack uninstall -y --force
-done
+# Solving takes long, so the lock is kept while its inputs are unchanged.
+inputs=$(
+    cd /opt/dev-env/spack
+    find spack.yaml config repo -type f ! -path '*/__pycache__/*' ! -name '*.pyc' -print0 |
+        LC_ALL=C sort -z | xargs -0 sha256sum
+    git -C /opt/spack rev-parse HEAD
+    git -C /opt/spack-packages rev-parse HEAD
+)
+inputs=$(sha256sum <<<"$inputs" | cut -d' ' -f1)
+if [[ -f "$env_dir/spack.lock" && "$(cat "$env_dir/.inputs" 2>/dev/null)" == "$inputs" ]]; then
+    printf 'build: %s\n' 'inputs unchanged; keeping spack.lock'
+else
+    rm -f "$env_dir/.inputs"
+    for attempt in 1 2; do
+        spack -e "$env_dir" concretize --force
+        spack -e "$env_dir" python "$stale.py" >"$stale"
+        [[ -s "$stale" ]] || break
+        ((attempt == 1)) || die "still built from older dev_env recipes: $(tr '\n' ' ' <"$stale")"
+        sed 's|^|/|' "$stale" | xargs spack uninstall -y --force
+    done
+    printf '%s\n' "$inputs" >"$env_dir/.inputs"
+fi
 rm -f -- "$stale" "$stale.py"
 spack -e "$env_dir" install --fail-fast --show-log-on-error
 

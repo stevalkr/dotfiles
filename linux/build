@@ -34,7 +34,7 @@ clone_pinned spack "$SPACK_GIT_URL" "$SPACK_TAG" "$SPACK_COMMIT"
 clone_pinned spack-packages "$SPACK_PACKAGES_GIT_URL" "$SPACK_PACKAGES_TAG" "$SPACK_PACKAGES_COMMIT"
 ensure_image
 
-mkdir -p "$cache"/{store,stage,sources,misc,bootstrap,home,env} "$dist/packages/mirror"
+mkdir -p "$cache"/{store,stage,sources,misc,concretizer,bootstrap,home,env} "$dist/packages/mirror"
 printf 'build: log %s\n' "$cache/build.log"
 docker_run \
     --volume "$linux_root/spack:/opt/dev-env/spack:ro" \
@@ -45,6 +45,7 @@ docker_run \
     --volume "$cache/stage:/opt/dev-env-build-stage" \
     --volume "$cache/sources:/opt/dev-env-source-cache" \
     --volume "$cache/misc:/opt/dev-env-misc-cache" \
+    --volume "$cache/concretizer:/opt/dev-env-concretizer-cache" \
     --volume "$cache/bootstrap:/opt/dev-env-bootstrap" \
     --volume "$cache/home:/opt/dev-env-home" \
     --volume "$cache/env:/opt/dev-env-env" \

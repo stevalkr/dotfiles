@@ -66,6 +66,11 @@ class Wezterm(Package):
         env.set("CARGO_NET_OFFLINE", "true")
 
     def build(self, spec, prefix):
+        # Without Git metadata in the stage, wezterm-version reads the version
+        # from .tag; this is what upstream's `git show` would produce.
+        if spec.satisfies("@=20261005.3725482"):
+            with open(join_path(self.stage.source_path, ".tag"), "w") as stream:
+                stream.write("20261005-054844-37254829\n")
         configure_crates_io_vendor(self.stage.source_path, CRATES)
         # Replace the source, not the dependency: Cargo.lock must retain its
         # exact Git identity when building with --locked --offline.

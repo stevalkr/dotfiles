@@ -99,34 +99,42 @@ done
 
 rm -f -- "$HOME/.local/bin/multiplexer"
 
-# Prepared Neovim data of the current release, replaced when its checksum changes.
-restore_local_data() {
-  local archive="$dev_env/local.tar.zst" nvim="$HOME/.local/share/nvim"
-  local record="$nvim/.dev-env-local.sha256" sha staging
-  [[ -f "$archive" ]] || return 0
-  sha=$(awk '$2 == "local.tar.zst" { print $1 }' "$dev_env/state.sha256")
-  [[ -n "$sha" ]] || { echo 'local.tar.zst is not in the release state' >&2; exit 1; }
-  [[ -f "$record" && "$(<"$record")" == "$sha" ]] && return 0
-  if tar -I zstd -tf "$archive" | grep -Ev '^(\.local/|\.local/share/|\.local/share/nvim(/.*)?)$' | grep -q . ||
-     tar -I zstd -tf "$archive" | grep -Eq '(^|/)\.\.(/|$)'; then
-    echo "unexpected paths in $archive" >&2; exit 1
-  fi
-  mkdir -p "$HOME/.local/share"
-  staging=$(mktemp -d "$HOME/.local/share/.nvim-local.XXXXXX")
-  tar -I zstd --no-same-owner -xf "$archive" -C "$staging"
-  if [[ -e "$nvim" || -L "$nvim" ]]; then
-    mkdir -p "$backup_root/.local/share"
-    mv -- "$nvim" "$backup_root/.local/share/nvim"
-    printf 'backed up %s\n' "$nvim"
+link_dir() {
+  local path="$HOME/$1" target=$2
+  [[ -L "$path" && "$(readlink -- "$path")" == "$target" ]] && return 0
+  if [[ -e "$path" || -L "$path" ]]; then
+    mkdir -p "$(dirname "$backup_root/$1")"
+    mv -- "$path" "$backup_root/$1"
+    printf 'backed up %s\n' "$path"
     backed_up=true
   fi
-  mv -- "$staging/.local/share/nvim" "$nvim"
-  rm -rf -- "$staging"
-  printf '%s\n' "$sha" >"$record"
-  echo "restored Neovim data from $archive"
+  mkdir -p "$(dirname "$path")"
+  ln -sfn -- "$target" "$path"
+  printf 'linked %s -> %s\n' "$path" "$target"
 }
-if [[ "$platform" == linux ]]; then
-  restore_local_data
+
+# Neovim state (undo, ShaDa, swap) is shared by every machine on the checkout;
+# its data is the current release's prepared copy, so it follows ./linux/install.
+link_nvim_dirs() {
+  local state="$repo/linux/out/state/nvim"
+  if [[ ! -e "$state" ]]; then
+    mkdir -p "$(dirname "$state")"
+    if [[ -d "$HOME/.local/state/nvim" && ! -L "$HOME/.local/state/nvim" ]]; then
+      mv -- "$HOME/.local/state/nvim" "$state"
+      echo "moved $HOME/.local/state/nvim to $state"
+    else
+      mkdir "$state"
+    fi
+  fi
+  link_dir .local/state/nvim "$state"
+
+  [[ -d "$dev_env/local/share/nvim" ]] ||
+    { echo 'The current release has no Neovim data; run ./linux/install.' >&2; exit 1; }
+  link_dir .local/share/nvim dev-env/local/share/nvim
+}
+# prepare builds the data in its own container home, outside the shared state.
+if [[ "$platform" == linux && "${DEV_ENV_PREPARE:-}" != 1 ]]; then
+  link_nvim_dirs
 fi
 
 if $backed_up; then

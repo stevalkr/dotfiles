@@ -1,0 +1,8 @@
+concretizer:
+  # Prune the solve with the exact root requirements before searching.
+  static_analysis: true
+  # Solver results, keyed by the solver input. The default location is under
+  # misc_cache, which each build clears.
+  concretization_cache:
+    enable: true
+    url: /opt/dev-env-concretizer-cache

@@ -87,6 +87,9 @@ docker_run() {
     printf 'root:x:0:\ndev-env:x:%s:\n' "$gid" >"$cache/etc/group"
     local args=(
         --rm --platform "$BUILD_PLATFORM" --user "$uid:$gid"
+        # PID 1 ignores Ctrl-C, which docker forwards; tini relays it to the
+        # whole process group so the command stops with the client.
+        --init --env TINI_KILL_PROCESS_GROUP=1
         --volume "$cache/etc/passwd:/etc/passwd:ro" --volume "$cache/etc/group:/etc/group:ro"
         --security-opt label=disable --security-opt seccomp=unconfined
         --env USER=dev-env

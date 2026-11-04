@@ -99,11 +99,17 @@ if is_macos then
   config.macos_window_background_blur = 5
 end
 
+-- Fontconfig does not scan the dev-env view; load its fonts directly.
+if not is_macos then
+  config.font_dirs = { wezterm.home_dir .. '/.local/share/dev-env/view/share/fonts' }
+end
+
 config.font_size = 12
 config.line_height = 1
 config.font = wezterm.font_with_fallback({
   {
-    family = 'Monaspace Argon',
+    -- Homebrew's cask ships plain Monaspace; the dev-env ships the Nerd Font build.
+    family = is_macos and 'Monaspace Argon' or 'Monaspace Argon NF',
     weight = 'Regular',
     stretch = 'Normal',
     style = 'Normal',

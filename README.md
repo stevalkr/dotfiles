@@ -69,11 +69,15 @@ Add this line to `~/.bashrc`:
 source "$HOME/.config/dev-env/activate.sh"
 ```
 
-To revert, point the link at an older release and rerun `./bootstrap`:
+`./bootstrap` links `~/.local/state/nvim` (undo, ShaDa, swap) to
+`linux/out/state/nvim`, shared by every machine on the checkout; the first
+machine's existing state seeds it. `~/.local/share/nvim` links to the current
+release's Neovim data, which `./linux/install` extracts once per release.
+
+To revert, install the older release; Neovim data follows it:
 
 ```sh
-ln -sfn "$PWD/linux/out/dev-env/releases/<id>" ~/.local/share/dev-env
-./bootstrap
+./linux/install <id>
 ```
 
 To keep only the current release (or `<id>`) and free space, run

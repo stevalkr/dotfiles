@@ -1,8 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-wezterm=$HOME/.local/share/dev-env/view/bin/wezterm
+view=$HOME/.local/share/dev-env/view
+wezterm=$view/bin/wezterm
 [[ -x "$wezterm" ]] || { echo 'wezterm: run ./linux/install first' >&2; exit 127; }
+
+# Spack's libxkbcommon compiles in the xkeyboard-config prefix, not its
+# share/X11/xkb, and relies on `spack load` to set XKB_CONFIG_ROOT instead.
+export XKB_CONFIG_ROOT="${XKB_CONFIG_ROOT:-$view/share/X11/xkb}"
+# Compose tables come from the view's libX11 rather than the system's.
+export XLOCALEDIR="${XLOCALEDIR:-$view/share/X11/locale}"
 
 if [[ -z "${XDG_RUNTIME_DIR:-}" ]]; then
     runtime_base="${TMPDIR:-/tmp}/dev-env-runtime-$(id -u)"

@@ -1,4 +1,5 @@
 import os
+import shutil
 
 from spack_repo.builtin.packages.llvm.package import Llvm as BuiltinLlvm
 
@@ -9,12 +10,12 @@ _RUNTIMES = "@=22.1.5 +clang libcxx=runtime libunwind=runtime platform=linux tar
 
 
 class Llvm(BuiltinLlvm):
-    """Builtin LLVM with portable runtime paths and no build-host GCC config."""
+    """Builtin LLVM with portable runtime paths, no build-host GCC config and
+    only the user-facing tools: no libexec/llvm build-tree copy, static
+    libraries, CMake packages or LLVM development and offload tools."""
 
     depends_on("patchelf", type="build", when=_RUNTIMES)
 
-    # Derived package callbacks precede inherited ones. Repair the build-tree
-    # c-index-test before builtin post_install copies it into libexec/llvm.
     # Spack records checksums after all install callbacks have completed.
     @run_after("install", when=_RUNTIMES)
     def repair_runtime_rpaths(self):
@@ -23,7 +24,6 @@ class Llvm(BuiltinLlvm):
         files = (
             (join_path(self.prefix, "lib/x86_64-unknown-linux-gnu/libc++.so.1.0"), True),
             (join_path(self.prefix, "lib/x86_64-unknown-linux-gnu/libc++abi.so.1.0"), True),
-            (join_path(self.build_directory, "bin/c-index-test"), False),
         )
         for path, add_origin in files:
             if not os.path.isfile(path):
@@ -42,18 +42,53 @@ class Llvm(BuiltinLlvm):
                 patchelf("--no-sort", "--set-rpath", new, path)
 
 
-def _without_gcc_install_dir(post_install):
-    """Run builtin post_install, then drop its build-host ``--gcc-install-dir`` configs.
+# Commands kept in bin; everything else there is an LLVM development, test or
+# offload tool. Links are kept with their targets. This also drops builtin
+# post_install's build-host ``--gcc-install-dir`` configs (clang.cfg): targets
+# have no Spack GCC, and without them clang finds the system GCC itself.
+_BIN_KEEP = {
+    # clang driver and C/C++ tooling
+    "clang", "clang++", "clang-22", "clang-cpp", "clang-cl",
+    "clangd", "clang-format", "git-clang-format",
+    "clang-tidy", "run-clang-tidy", "clang-apply-replacements",
+    "clang-include-cleaner", "clang-query", "clang-check", "clang-scan-deps",
+    "scan-build", "scan-build-py", "scan-view", "analyze-build", "intercept-build",
+    # linkers
+    "lld", "ld.lld", "ld64.lld", "lld-link", "wasm-ld",
+    # binutils replacements, sanitizer symbolizer, coverage
+    "llvm-ar", "llvm-ranlib", "llvm-lib", "llvm-nm", "llvm-objcopy", "llvm-strip",
+    "llvm-objdump", "llvm-readobj", "llvm-readelf", "llvm-size", "llvm-strings",
+    "llvm-symbolizer", "llvm-addr2line", "llvm-cxxfilt", "llvm-dwarfdump",
+    "llvm-profdata", "llvm-cov", "llvm-config",
+    # IR and machine-code tools
+    "opt", "llc", "lli", "llvm-as", "llvm-dis", "llvm-link", "llvm-mc", "llvm-mca",
+}
 
-    Targets have no Spack GCC; without the configs clang finds the system GCC itself.
-    """
+
+def _prune(prefix):
+    """Remove what a toolchain install does not need."""
+    shutil.rmtree(join_path(prefix, "libexec", "llvm"))
+    for name in os.listdir(prefix.bin):
+        if name not in _BIN_KEEP:
+            os.remove(join_path(prefix.bin, name))
+    for name in _BIN_KEEP:
+        if not os.path.exists(join_path(prefix.bin, name)):
+            raise InstallError("LLVM prune: missing bin/" + name)
+    # Runtime archives (libc++.a, libunwind.a) live in the target subdirectory.
+    for name in os.listdir(prefix.lib):
+        if name.endswith(".a"):
+            os.remove(join_path(prefix.lib, name))
+    # The exported CMake targets name the removed archives and tools.
+    for name in ("llvm", "clang", "lld"):
+        shutil.rmtree(join_path(prefix.lib, "cmake", name))
+
+
+def _toolchain_only(post_install):
+    """Run builtin post_install, then prune the install."""
 
     def wrapper(pkg):
         post_install(pkg)
-        for cfg in ("clang.cfg", "clang++.cfg"):
-            path = join_path(pkg.prefix.bin, cfg)
-            if os.path.lexists(path):
-                os.remove(path)
+        _prune(pkg.prefix)
 
     return wrapper
 
@@ -62,7 +97,7 @@ def _without_gcc_install_dir(post_install):
 # would not replace the inherited one.
 _callbacks = Llvm._run_after_callbacks
 Llvm._run_after_callbacks = [
-    (key, _without_gcc_install_dir(fn) if fn is BuiltinLlvm.post_install else fn)
+    (key, _toolchain_only(fn) if fn is BuiltinLlvm.post_install else fn)
     for key, fn in _callbacks
 ]
 if Llvm._run_after_callbacks == _callbacks:

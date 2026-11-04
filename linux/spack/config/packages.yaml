@@ -1,12 +1,23 @@
 packages:
   all:
     require: "target=x86_64"
+  # Only GCC compiles. Otherwise every installed C/C++ provider (each llvm
+  # build in the store) is a compiler candidate for every node.
   c:
+    require: ["gcc"]
     prefer: ["gcc@8.5.0"]
   cxx:
+    require: ["gcc"]
     prefer: ["gcc@8.5.0"]
   fortran:
+    require: ["gcc"]
     prefer: ["gcc@8.5.0"]
+  # Neovim and its Lua modules use upstream LuaJIT, not Spack's default
+  # OpenResty fork; the neovim recipe pins the version.
+  luajit:
+    require: "lua-luajit"
+  lua-lang:
+    require: "lua-luajit"
   gcc:
     externals:
     - spec: "gcc@8.5.0 languages='c,c++,fortran'"

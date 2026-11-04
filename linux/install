@@ -67,6 +67,23 @@ done <"$release/.roots"
 rm -rf -- "$public"
 mv -- "$public.tmp" "$public"
 
+# local: prepared Neovim data, extracted once and shared by every home --------
+# Homes link ~/.local/share/nvim to dev-env/local/share/nvim (see bootstrap).
+archive=$release/local.tar.zst
+if [[ -f "$archive" && ! -d "$release/local" ]]; then
+    if tar -I zstd -tf "$archive" | grep -Ev '^(\.local/|\.local/share/|\.local/share/nvim(/.*)?)$' | grep -q . ||
+        tar -I zstd -tf "$archive" | grep -Eq '(^|/)\.\.(/|$)'; then
+        die "unexpected paths in $archive"
+    fi
+    rm -rf -- "$release/local.tmp"
+    mkdir -p "$release/local.tmp"
+    tar -I zstd --no-same-owner -xf "$archive" -C "$release/local.tmp"
+    mv -T -- "$release/local.tmp/.local" "$release/local"
+    rm -rf -- "$release/local.tmp"
+fi
+[[ -d "$release/local/share/nvim" ]] ||
+    printf 'install: %s has no Neovim data; ./bootstrap will not link it\n' "$id" >&2
+
 mkdir -p "${dev_env_link%/*}"
 [[ -L "$dev_env_link" || ! -e "$dev_env_link" ]] || die "$dev_env_link exists and is not a link"
 ln -sfn -- "$release" "$dev_env_link"
