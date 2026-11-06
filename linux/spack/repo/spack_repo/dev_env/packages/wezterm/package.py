@@ -58,7 +58,9 @@ class Wezterm(Package):
     depends_on("libxkbcommon+wayland")
     depends_on("xkeyboard-config", type="run")
     depends_on("wayland")
-    depends_on("mesa+egl~llvm")
+    # No mesa: wezterm dlopens libEGL.so.1 by name, and Spack's RPATH outranks
+    # LD_LIBRARY_PATH, so a mesa dependency here replaces the host's GPU driver
+    # with Spack's softpipe-only build.
 
     phases = ["build", "install"]
 
