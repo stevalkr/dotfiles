@@ -73,11 +73,15 @@ source "$HOME/.config/dev-env/activate.sh"
 `linux/out/state/nvim`, shared by every machine on the checkout; the first
 machine's existing state seeds it. `~/.local/share/nvim` links to the current
 release's Neovim data, which `./linux/install` extracts once per release.
+Desktop entries and icons of the release are linked into
+`~/.local/share/applications` and `~/.local/share/icons`.
 
-To revert, install the older release; Neovim data follows it:
+To revert, install the older release; Neovim data follows it, and relinking
+moves desktop entries and icons to it:
 
 ```sh
 ./linux/install <id>
+./bootstrap --stow-only
 ```
 
 To keep only the current release (or `<id>`) and free space, run

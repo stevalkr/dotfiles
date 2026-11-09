@@ -154,58 +154,50 @@ config.keys = {
   utils.adjust_pane({ key = 'j', mods = 'CTRL|SHIFT' }, 'Down'),
   utils.adjust_pane({ key = 'k', mods = 'CTRL|SHIFT' }, 'Up'),
   utils.adjust_pane({ key = 'l', mods = 'CTRL|SHIFT' }, 'Right'),
+  { key = 't', mods = 'CMD', action = act.SpawnCommandInNewTab({ domain = 'CurrentPaneDomain' }) },
+  {
+    key = 't',
+    mods = 'CMD|SHIFT',
+    action = act.SpawnCommandInNewTab({ domain = { DomainName = 'local' }, cwd = wezterm.home_dir }),
+  },
+  {
+    key = 'j',
+    mods = 'CMD',
+    action = act.SplitPane({ direction = 'Down', command = { domain = 'CurrentPaneDomain' } }),
+  },
+  {
+    key = 'j',
+    mods = 'CMD|SHIFT',
+    action = act.SplitPane({ direction = 'Down', command = { cwd = wezterm.home_dir } }),
+  },
+  {
+    key = 'l',
+    mods = 'CMD',
+    action = act.SplitPane({ direction = 'Right', command = { domain = 'CurrentPaneDomain' } }),
+  },
+  {
+    key = 'l',
+    mods = 'CMD|SHIFT',
+    action = act.SplitPane({ direction = 'Right', command = { cwd = wezterm.home_dir } }),
+  },
+  { key = 'LeftArrow', mods = 'CMD', action = act.ActivateTabRelative(-1) },
+  { key = 'RightArrow', mods = 'CMD', action = act.ActivateTabRelative(1) },
+  { key = '[', mods = 'CMD', action = act.MoveTabRelative(-1) },
+  { key = ']', mods = 'CMD', action = act.MoveTabRelative(1) },
+  { key = 'p', mods = 'CMD', action = act.PaneSelect({ mode = 'SwapWithActiveKeepFocus' }) },
+  { key = 'p', mods = 'CMD|SHIFT', action = act.PaneSelect },
+  { key = 'e', mods = 'CMD', action = act.CloseCurrentPane({ confirm = true }) },
+  { key = 'w', mods = 'CMD', action = act.CloseCurrentTab({ confirm = true }) },
+  utils.if_run(function(_, pane)
+    return not utils.should_forward(pane)
+  end, {
+    key = 'g',
+    mods = 'CMD',
+    action = function(win, pane)
+      win:perform_action({ EmitEvent = 'trigger-vim-with-scrollback' }, pane)
+    end,
+  }),
 }
-
-if is_macos then
-  local mac_keys = {
-    { key = 't', mods = 'CMD', action = act.SpawnCommandInNewTab({ domain = 'CurrentPaneDomain' }) },
-    {
-      key = 't',
-      mods = 'CMD|SHIFT',
-      action = act.SpawnCommandInNewTab({ domain = { DomainName = 'local' }, cwd = wezterm.home_dir }),
-    },
-    {
-      key = 'j',
-      mods = 'CMD',
-      action = act.SplitPane({ direction = 'Down', command = { domain = 'CurrentPaneDomain' } }),
-    },
-    {
-      key = 'j',
-      mods = 'CMD|SHIFT',
-      action = act.SplitPane({ direction = 'Down', command = { cwd = wezterm.home_dir } }),
-    },
-    {
-      key = 'l',
-      mods = 'CMD',
-      action = act.SplitPane({ direction = 'Right', command = { domain = 'CurrentPaneDomain' } }),
-    },
-    {
-      key = 'l',
-      mods = 'CMD|SHIFT',
-      action = act.SplitPane({ direction = 'Right', command = { cwd = wezterm.home_dir } }),
-    },
-    { key = 'LeftArrow', mods = 'CMD', action = act.ActivateTabRelative(-1) },
-    { key = 'RightArrow', mods = 'CMD', action = act.ActivateTabRelative(1) },
-    { key = '[', mods = 'CMD', action = act.MoveTabRelative(-1) },
-    { key = ']', mods = 'CMD', action = act.MoveTabRelative(1) },
-    { key = 'p', mods = 'CMD', action = act.PaneSelect({ mode = 'SwapWithActiveKeepFocus' }) },
-    { key = 'p', mods = 'CMD|SHIFT', action = act.PaneSelect },
-    { key = 'e', mods = 'CMD', action = act.CloseCurrentPane({ confirm = true }) },
-    { key = 'w', mods = 'CMD', action = act.CloseCurrentTab({ confirm = true }) },
-    utils.if_run(function(_, pane)
-      return not utils.should_forward(pane)
-    end, {
-      key = 'g',
-      mods = 'CMD',
-      action = function(win, pane)
-        win:perform_action({ EmitEvent = 'trigger-vim-with-scrollback' }, pane)
-      end,
-    }),
-  }
-  for _, key in ipairs(mac_keys) do
-    table.insert(config.keys, key)
-  end
-end
 
 wezterm.on('trigger-vim-with-scrollback', function(window, pane)
   local name = os.tmpname()

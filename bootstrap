@@ -46,9 +46,26 @@ case "$(uname -s)" in
   *) echo 'Unsupported platform' >&2; exit 2 ;;
 esac
 
+# Desktop entries and icons of the current release. Stow resolves the view to
+# releases/<id>, so links into any release are dropped before restowing.
+stow_share() {
+  local share="$dev_env/view/share" dir
+  for dir in applications icons; do
+    if [[ -d "$HOME/.local/share/$dir" ]]; then
+      find "$HOME/.local/share/$dir" -type l -lname '*/dev-env/releases/*/view/share/*' -delete
+    fi
+    [[ -d "$share/$dir" ]] || continue
+    mkdir -p "$HOME/.local/share/$dir"
+    "$stow" --restow --no-folding --dir "$share" --target "$HOME/.local/share/$dir" "$dir"
+  done
+}
+
 restow() {
   "$stow" --restow --no-folding --dir "$repo" --target "$HOME" home
   "$stow" --restow --no-folding --dir "$repo/$platform" --target "$HOME" home
+  if [[ "$platform" == linux ]]; then
+    stow_share
+  fi
 }
 
 if $stow_only; then

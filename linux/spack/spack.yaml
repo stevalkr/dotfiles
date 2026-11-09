@@ -27,6 +27,7 @@ spack:
   - bat@=0.24.0
   - tree-sitter@=0.27.0-dev.20260821 +cli
   - fzf@=0.73.1 ~vim
+  - lazygit@=0.66.3
   - imagemagick@=7.1.1-39 +zlib ~ghostscript ~rsvg
   - stow@=2.4.1
   - direnv@=2.37.1
@@ -35,7 +36,7 @@ spack:
   - prettierd@=0.29.0
   - py-cairosvg@=2.7.1
   - py-pyperclip@=1.11.0
-  - fish@=4.2.0 ~docs
+  - fish@=4.9.3 ~docs
   - bubblewrap@=0.11.0
   - rocketchat-tui@=2022.11.21
   - monaspace-nerd-fonts@=1.400
