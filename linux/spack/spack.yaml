@@ -9,7 +9,7 @@ spack:
   - tmux@=3.8 ~static ~jemalloc +utf8proc
   - zmx@=0.8.1
   - wezterm@=20261005.3725482
-  - python@=3.11.15 +shared +ssl +sqlite3 +readline +bz2 +lzma +zlib ~tkinter ~tests
+  - python@=3.14.5 +shared +ssl +sqlite3 +readline +bz2 +lzma +zlib +zstd ~tkinter ~tests
   - py-pyink@=26.5.1
   - py-pynvim@=0.6.0
   - py-pillow@=12.2.0 +zlib +jpeg +tiff +webp +freetype +lcms +jpeg2000 ~raqm ~imagequant ~xcb ~avif ^libwebp+libwebpmux+libwebpdemux
