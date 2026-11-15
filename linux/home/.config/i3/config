@@ -8,9 +8,9 @@
 # i3 config file (v4)
 #
 # Please see https://i3wm.org/docs/userguide.html for a complete reference!
-# Runtime dependencies are intentionally provisioned by the Linux host, not
-# this repository: dex, xss-lock, i3lock, nm-applet, pactl, dmenu,
-# i3-sensible-terminal, i3status, a clipboard utility, and multiplexer.
+# Runtime dependencies, provided by the host: dex, xss-lock, i3lock,
+# nm-applet, pactl, dmenu, i3-sensible-terminal, i3status, a clipboard utility,
+# and multiplexer.
 
 set $mod Mod4
 

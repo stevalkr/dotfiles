@@ -19,6 +19,7 @@ brew "tree"
 brew "htop"
 brew "ripgrep"
 brew "bat"
+brew "eza"
 
 brew "tmux"
 brew "zmx"

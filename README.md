@@ -13,7 +13,7 @@ nvim # Wait for plugin/parser installation, then quit.
 ```
 
 To enable Remote Login, use `./bootstrap --enable-remote-login`.
-Change packages in `macos/Brewfile`, then rerun `./macos/bootstrap`.
+Change packages in `macos/Brewfile`, then rerun `./bootstrap`.
 
 ## Linux
 

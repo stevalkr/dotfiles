@@ -2,7 +2,6 @@
 set -euo pipefail
 
 repo=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
-home_package="$repo/home"
 enable_remote_login=false
 stow_only=false
 usage() {
@@ -25,26 +24,66 @@ case "$(uname -s)" in
   Darwin)
     [[ "$(uname -m)" == arm64 ]] || { echo 'macOS requires Apple Silicon.' >&2; exit 2; }
     platform=macos
-    stow=stow
-    if $stow_only; then
-      :
-    elif $enable_remote_login; then
-      "$repo/macos/bootstrap" --enable-remote-login
-    else
-      "$repo/macos/bootstrap"
-    fi
-    export PATH="/opt/homebrew/bin:$PATH"
-    command -v stow >/dev/null 2>&1 || { echo 'Install Stow before running bootstrap.' >&2; exit 1; }
+    stow=/opt/homebrew/bin/stow
+    stow_missing='Stow is missing; run ./bootstrap without --stow-only.'
     ;;
   Linux)
     $enable_remote_login && { echo '--enable-remote-login is only supported on macOS' >&2; exit 2; }
     platform=linux
     dev_env="$HOME/.local/share/dev-env"
     stow="$dev_env/public/bin/stow"
-    [[ -x "$stow" ]] || { echo 'Run ./linux/install first.' >&2; exit 1; }
+    stow_missing='Run ./linux/install first.'
     ;;
   *) echo 'Unsupported platform' >&2; exit 2 ;;
 esac
+packages=("$repo/home" "$repo/$platform/home")
+
+# macOS ------------------------------------------------------------------------
+
+provision_macos() {
+  local runtime_root python_provider node_root
+  eval "$(/opt/homebrew/bin/brew shellenv bash)"
+  brew bundle --file "$repo/macos/Brewfile"
+
+  runtime_root="${XDG_DATA_HOME:-$HOME/.local/share}/nvim"
+  python_provider="$runtime_root/python"
+  if [[ ! -x "$python_provider/bin/python" ]]; then
+    uv python install 3.13
+    uv venv --managed-python --python 3.13 "$python_provider"
+  fi
+  uv pip install --python "$python_provider/bin/python" \
+    pynvim \
+    jupyter-client \
+    cairosvg \
+    pnglatex \
+    plotly \
+    kaleido \
+    pyperclip \
+    nbformat \
+    pillow \
+    requests \
+    websocket-client
+
+  node_root="$runtime_root/node"
+  export FNM_DIR="$node_root/fnm"
+  eval "$(fnm env --shell bash)"
+  fnm install --lts --use
+  npm install --prefix "$node_root/packages" --no-save --no-package-lock \
+    neovim \
+    markdownlint-cli \
+    @fsouza/prettierd \
+    pyright
+  mkdir -p "$node_root/bin"
+  ln -sfn "$(node -p 'process.execPath')" "$node_root/bin/node"
+
+  if $enable_remote_login; then
+    "$repo/macos/defaults.sh" --enable-remote-login
+  else
+    "$repo/macos/defaults.sh"
+  fi
+}
+
+# Linux ------------------------------------------------------------------------
 
 # Desktop entries and icons of the current release, linked through
 # releases/<id>; links into any release are dropped first. The view's files are
@@ -69,76 +108,6 @@ stow_share() {
   done
 }
 
-restow() {
-  "$stow" --restow --no-folding --dir "$repo" --target "$HOME" home
-  "$stow" --restow --no-folding --dir "$repo/$platform" --target "$HOME" home
-  if [[ "$platform" == linux ]]; then
-    stow_share
-  fi
-}
-
-if $stow_only; then
-  restow
-  echo 'Configs restowed.'
-  exit 0
-fi
-
-mkdir -p "$HOME/.dotfiles-backup"
-backup_root=$(mktemp -d "$HOME/.dotfiles-backup/$(date +%Y%m%d-%H%M%S).XXXXXX")
-backed_up=false
-
-backup_config() {
-  local destination="$HOME/$1"
-  local backup_destination="$backup_root/$1"
-  [[ -e "$destination" || -L "$destination" ]] || return 0
-
-  mkdir -p "$(dirname "$backup_destination")"
-  cp -RLp "$destination" "$backup_destination"
-  rm -rf -- "$destination"
-  printf 'backed up %s\n' "$destination"
-  backed_up=true
-}
-
-backup_config_roots() {
-  local package=$1
-  local source
-
-  [[ -d "$package/.config" ]] || return 0
-  while IFS= read -r -d '' source; do
-    backup_config ".config/${source##*/}"
-  done < <(find "$package/.config" -mindepth 1 -maxdepth 1 -print0)
-}
-
-backup_config_roots "$home_package"
-backup_config_roots "$repo/$platform/home"
-if [[ "$platform" == macos ]]; then
-  backup_config .zprofile
-fi
-
-for ssh_config in "$HOME/.ssh/config" "$HOME/.ssh/config.local"; do
-  if [[ -e "$ssh_config" || -L "$ssh_config" ]]; then
-    rm -f -- "$ssh_config.bak"
-    cp -RLp "$ssh_config" "$ssh_config.bak"
-    rm -f -- "$ssh_config"
-  fi
-done
-
-rm -f -- "$HOME/.local/bin/multiplexer"
-
-link_dir() {
-  local path="$HOME/$1" target=$2
-  [[ -L "$path" && "$(readlink -- "$path")" == "$target" ]] && return 0
-  if [[ -e "$path" || -L "$path" ]]; then
-    mkdir -p "$(dirname "$backup_root/$1")"
-    mv -- "$path" "$backup_root/$1"
-    printf 'backed up %s\n' "$path"
-    backed_up=true
-  fi
-  mkdir -p "$(dirname "$path")"
-  ln -sfn -- "$target" "$path"
-  printf 'linked %s -> %s\n' "$path" "$target"
-}
-
 # Neovim state (undo, ShaDa, swap) is shared by every machine on the checkout;
 # its data is the current release's prepared copy, so it follows ./linux/install.
 link_nvim_dirs() {
@@ -158,17 +127,79 @@ link_nvim_dirs() {
     { echo 'The current release has no Neovim data; run ./linux/install.' >&2; exit 1; }
   link_dir .local/share/nvim dev-env/local/share/nvim
 }
-# prepare builds the data in its own container home, outside the shared state.
-if [[ "$platform" == linux && "${DEV_ENV_PREPARE:-}" != 1 ]]; then
-  link_nvim_dirs
+
+# Shared -----------------------------------------------------------------------
+
+backup_root=
+
+# Move ~/$1 into this run's backup, snapshotting the files it links to.
+backup() {
+  local path="$HOME/$1"
+  [[ -e "$path" || -L "$path" ]] || return 0
+  if [[ -z "$backup_root" ]]; then
+    mkdir -p "$HOME/.dotfiles-backup"
+    backup_root=$(mktemp -d "$HOME/.dotfiles-backup/$(date +%Y%m%d-%H%M%S).XXXXXX")
+  fi
+  mkdir -p "$(dirname "$backup_root/$1")"
+  if [[ -L "$path" ]]; then
+    mv -- "$path" "$backup_root/$1"
+  else
+    cp -RLp "$path" "$backup_root/$1"
+    rm -rf -- "$path"
+  fi
+  printf 'backed up %s\n' "$path"
+}
+
+link_dir() {
+  local path="$HOME/$1" target=$2
+  [[ -L "$path" && "$(readlink -- "$path")" == "$target" ]] && return 0
+  backup "$1"
+  mkdir -p "$(dirname "$path")"
+  ln -sfn -- "$target" "$path"
+  printf 'linked %s -> %s\n' "$path" "$target"
+}
+
+# Each package's ~/.config/<app> is replaced whole; any other file Stow would
+# link is backed up unless it already resolves to the package's copy.
+backup_conflicts() {
+  local package source
+  for package in "${packages[@]}"; do
+    if [[ -d "$package/.config" ]]; then
+      while IFS= read -r -d '' source; do
+        backup ".config/${source##*/}"
+      done < <(find "$package/.config" -mindepth 1 -maxdepth 1 -print0)
+    fi
+    while IFS= read -r -d '' source; do
+      [[ "$HOME/${source#"$package/"}" -ef "$source" ]] || backup "${source#"$package/"}"
+    done < <(find "$package" ! -type d -print0)
+  done
+}
+
+# Main -------------------------------------------------------------------------
+
+if ! $stow_only; then
+  [[ "$platform" == macos ]] && provision_macos
+  backup_conflicts
 fi
 
-if $backed_up; then
+[[ -x "$stow" ]] || { echo "$stow_missing" >&2; exit 1; }
+for package in "${packages[@]}"; do
+  "$stow" --restow --no-folding --dir "${package%/home}" --target "$HOME" home
+done
+
+if [[ "$platform" == linux ]]; then
+  # prepare builds the data in its own container home, outside the shared state.
+  if ! $stow_only && [[ "${DEV_ENV_PREPARE:-}" != 1 ]]; then
+    link_nvim_dirs
+  fi
+  stow_share
+fi
+
+if [[ -n "$backup_root" ]]; then
   echo "Configuration snapshots were copied to $backup_root"
-else
-  rmdir "$backup_root" 2>/dev/null || true
 fi
-
-restow
-
-echo 'Bootstrap completed successfully.'
+if $stow_only; then
+  echo 'Configs restowed.'
+else
+  echo 'Bootstrap completed successfully.'
+fi

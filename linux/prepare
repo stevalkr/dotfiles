@@ -36,8 +36,7 @@ in_container() {
     "$dotfiles/bootstrap"
     # shellcheck source=home/.config/dev-env/activate.sh
     source "$HOME/.config/dev-env/activate.sh"
-    # Build parsers and plugins with the release's clang; only here, the
-    # environment itself leaves cc/c++ to the system compiler.
+    # Build parsers and plugins with the release's clang.
     need clang clang++
     export CC=clang CXX=clang++
     # Parser builds would otherwise embed the prepare home (assert __FILE__).

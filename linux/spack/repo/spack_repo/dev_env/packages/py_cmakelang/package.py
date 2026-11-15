@@ -12,7 +12,7 @@ class PyCmakelang(PythonPackage):
     depends_on("py-six", type=("build", "run"))
 
     def patch(self):
-        # The sdist puts its README at the root, unlike the Git checkout.
+        # The sdist puts its README at the root.
         filter_file("cmakelang/doc/README.rst", "README.rst", "setup.py", string=True)
         # Build cmakelang without the subsequent legacy metapackage setup calls.
         with open("setup.py", encoding="utf-8") as source:

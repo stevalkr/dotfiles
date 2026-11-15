@@ -16,7 +16,6 @@ class Llvm(BuiltinLlvm):
 
     depends_on("patchelf", type="build", when=_RUNTIMES)
 
-    # Spack records checksums after all install callbacks have completed.
     @run_after("install", when=_RUNTIMES)
     def repair_runtime_rpaths(self):
         patchelf = Executable(self.spec["patchelf"].prefix.bin.patchelf)

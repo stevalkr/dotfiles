@@ -23,6 +23,7 @@ spack:
   - markdownlint-cli@=0.49.1
   - pyright@=1.1.414
   - fd@=10.4.2
+  - eza@=0.20.4
   - ripgrep@=15.1.0 +pcre2
   - bat@=0.24.0
   - tree-sitter@=0.27.0-dev.20260821 +cli

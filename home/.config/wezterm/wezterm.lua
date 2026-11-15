@@ -3,7 +3,7 @@ local is_macos = wezterm.target_triple:find('darwin') ~= nil
 local multiplexer = wezterm.home_dir .. '/.local/bin/multiplexer'
 
 -- GUI applications do not necessarily inherit the login shell's PATH. Read it
--- once from the configured login shell instead of baking in a Homebrew prefix.
+-- once from the configured login shell.
 local function login_path()
   local shell = os.getenv('SHELL') or '/bin/sh'
   local ok, stdout = wezterm.run_child_process({ shell, '-lc', '/usr/bin/printenv PATH' })
