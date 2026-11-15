@@ -46,17 +46,26 @@ case "$(uname -s)" in
   *) echo 'Unsupported platform' >&2; exit 2 ;;
 esac
 
-# Desktop entries and icons of the current release. Stow resolves the view to
-# releases/<id>, so links into any release are dropped before restowing.
+# Desktop entries and icons of the current release, linked through
+# releases/<id>; links into any release are dropped first. The view's files are
+# absolute links into the store, which Stow refuses to stow.
 stow_share() {
-  local share="$dev_env/view/share" dir
+  local share dir file target
+  share="$(cd -P "$dev_env" && pwd)/view/share"
   for dir in applications icons; do
     if [[ -d "$HOME/.local/share/$dir" ]]; then
       find "$HOME/.local/share/$dir" -type l -lname '*/dev-env/releases/*/view/share/*' -delete
     fi
     [[ -d "$share/$dir" ]] || continue
-    mkdir -p "$HOME/.local/share/$dir"
-    "$stow" --restow --no-folding --dir "$share" --target "$HOME/.local/share/$dir" "$dir"
+    while IFS= read -r -d '' file; do
+      target="$HOME/.local/share/$dir/${file#"$share/$dir/"}"
+      if [[ -e "$target" || -L "$target" ]]; then
+        echo "Not linking $target: it already exists." >&2
+        continue
+      fi
+      mkdir -p "${target%/*}"
+      ln -s "$file" "$target"
+    done < <(find "$share/$dir" ! -type d -print0)
   done
 }
 

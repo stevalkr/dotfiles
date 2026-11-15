@@ -40,7 +40,7 @@ spack:
   - bubblewrap@=0.11.0
   - rocketchat-tui@=2022.11.21
   - monaspace-nerd-fonts@=1.400
-  - claude-code@=2.1.308
+  - claude-code@=2.1.322
   view: view
   concretizer:
     unify: true
