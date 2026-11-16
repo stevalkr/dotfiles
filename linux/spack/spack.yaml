@@ -32,7 +32,7 @@ spack:
   - imagemagick@=7.1.1-39 +zlib ~ghostscript ~rsvg
   - stow@=2.4.1
   - direnv@=2.37.1
-  - zoxide@=0.9.8
+  - zoxide@=0.10.0
   - py-cmakelang@=0.6.13
   - prettierd@=0.29.0
   - py-cairosvg@=2.7.1
